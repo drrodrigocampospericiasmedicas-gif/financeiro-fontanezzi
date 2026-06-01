@@ -1,143 +1,287 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
-  bg:       "#0d0f14",
-  surface:  "#13161e",
-  card:     "#1a1e2a",
-  border:   "#252836",
-  gold:     "#c9a84c",
-  goldLight:"#e8c97a",
-  goldDim:  "#7a6330",
-  green:    "#4caf82",
-  red:      "#e05c5c",
-  blue:     "#4c8ec9",
-  text:     "#e8e6df",
-  muted:    "#6b6f7d",
-  soft:     "#9a98a0",
+  bg:        "#0d0f14",
+  surface:   "#13161e",
+  card:      "#1a1e2a",
+  border:    "#252836",
+  gold:      "#c9a84c",
+  goldLight: "#e8c97a",
+  goldDim:   "#7a6330",
+  green:     "#4caf82",
+  red:       "#e05c5c",
+  blue:      "#4c8ec9",
+  purple:    "#9b59b6",
+  pink:      "#e05c9b",
+  text:      "#e8e6df",
+  muted:     "#6b6f7d",
+  soft:      "#9a98a0",
 };
 
-const FONTS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500&display=swap');
-`;
+const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap');`;
 
-// ─── CATEGORIES ──────────────────────────────────────────────────────────────
+// ─── CATEGORIES ───────────────────────────────────────────────────────────────
 const DEFAULT_CATEGORIES = [
-  { id: "alimentacao",   label: "Alimentação",    icon: "🍽️",  color: "#e08c4c" },
-  { id: "transporte",    label: "Transporte",     icon: "🚗",  color: "#4c8ec9" },
-  { id: "saude",         label: "Saúde",          icon: "🏥",  color: "#4caf82" },
-  { id: "educacao",      label: "Educação",       icon: "📚",  color: "#9b59b6" },
-  { id: "lazer",         label: "Lazer",          icon: "🎭",  color: "#e05c9b" },
-  { id: "moradia",       label: "Moradia",        icon: "🏠",  color: "#c9a84c" },
-  { id: "vestuario",     label: "Vestuário",      icon: "👔",  color: "#5cc9e0" },
-  { id: "financeiro",    label: "Financeiro",     icon: "💳",  color: "#e05c5c" },
-  { id: "transferencia", label: "Transferência",  icon: "🔄",  color: "#6b6f7d" },
-  { id: "receita",       label: "Receita",        icon: "💰",  color: "#4caf82" },
-  { id: "outros",        label: "Outros",         icon: "📦",  color: "#9a98a0" },
+  { id: "alimentacao",   label: "Alimentação",   icon: "🍽️", color: "#e08c4c" },
+  { id: "transporte",    label: "Transporte",    icon: "🚗",  color: "#4c8ec9" },
+  { id: "saude",         label: "Saúde",         icon: "🏥",  color: "#4caf82" },
+  { id: "educacao",      label: "Educação",      icon: "📚",  color: "#9b59b6" },
+  { id: "lazer",         label: "Lazer",         icon: "🎭",  color: "#e05c9b" },
+  { id: "moradia",       label: "Moradia",       icon: "🏠",  color: "#c9a84c" },
+  { id: "vestuario",     label: "Vestuário",     icon: "👔",  color: "#5cc9e0" },
+  { id: "financeiro",    label: "Financeiro",    icon: "💳",  color: "#e05c5c" },
+  { id: "transferencia", label: "Transferência", icon: "🔄",  color: "#6b6f7d" },
+  { id: "receita",       label: "Receita",       icon: "💰",  color: "#4caf82" },
+  { id: "outros",        label: "Outros",        icon: "📦",  color: "#9a98a0" },
 ];
+
+// ─── SUPABASE CLIENT (lazy init) ──────────────────────────────────────────────
+let _sb = null;
+function getSB() {
+  const url = localStorage.getItem("sb_url");
+  const key = localStorage.getItem("sb_key");
+  if (!url || !key) return null;
+  if (_sb) return _sb;
+  // minimal Supabase REST client (no npm needed in artifact)
+  _sb = {
+    url, key,
+    headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "Prefer": "return=representation" },
+    async from(table) {
+      const base = `${url}/rest/v1/${table}`;
+      return {
+        async select(q = "*") {
+          const r = await fetch(`${base}?select=${q}&order=date.desc`, { headers: _sb.headers });
+          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
+        },
+        async insert(row) {
+          const r = await fetch(base, { method: "POST", headers: _sb.headers, body: JSON.stringify(row) });
+          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
+        },
+        async update(row, match) {
+          const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
+          const r = await fetch(`${base}?${qs}`, { method: "PATCH", headers: _sb.headers, body: JSON.stringify(row) });
+          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
+        },
+        async delete(match) {
+          const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
+          const r = await fetch(`${base}?${qs}`, { method: "DELETE", headers: _sb.headers });
+          return r.ok ? { data: null, error: null } : { data: null, error: await r.text() };
+        },
+      };
+    }
+  };
+  return _sb;
+}
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
-const MOCK_ACCOUNTS = [
-  { id: "a1", name: "Nubank - Rodrigo",   type: "corrente", owner: "rodrigo", balance: 8420.50,  color: "#9b59b6" },
-  { id: "a2", name: "Itaú - Rodrigo",     type: "corrente", owner: "rodrigo", balance: 15230.00, color: "#c9a84c" },
-  { id: "a3", name: "Nubank - Esposa",    type: "corrente", owner: "esposa",  balance: 5870.30,  color: "#e05c9b" },
-  { id: "a4", name: "C6 Casal",           type: "corrente", owner: "casal",   balance: 3200.00,  color: "#4caf82" },
-  { id: "a5", name: "XP Investimentos",   type: "investimento", owner: "rodrigo", balance: 42000.00, color: "#4c8ec9" },
-];
-
 const TODAY = new Date();
-const fmt = (d) => d.toISOString().split("T")[0];
+const fmt   = (d) => d.toISOString().split("T")[0];
 const daysAgo = (n) => { const d = new Date(TODAY); d.setDate(d.getDate() - n); return fmt(d); };
 
-const MOCK_TRANSACTIONS = [
-  { id: "t1",  accountId: "a1", date: daysAgo(0),  description: "Padaria São José",         amount: -28.50,   category: "alimentacao",  notes: "" },
-  { id: "t2",  accountId: "a2", date: daysAgo(1),  description: "Posto Ipiranga",            amount: -180.00,  category: "transporte",   notes: "" },
-  { id: "t3",  accountId: "a1", date: daysAgo(1),  description: "iFood",                    amount: -67.30,   category: "alimentacao",  notes: "" },
-  { id: "t4",  accountId: "a3", date: daysAgo(2),  description: "Farmácia Drogasil",         amount: -95.00,   category: "saude",        notes: "" },
-  { id: "t5",  accountId: "a2", date: daysAgo(2),  description: "Salário",                   amount: 18500.00, category: "receita",      notes: "" },
-  { id: "t6",  accountId: "a3", date: daysAgo(3),  description: "Salário Esposa",            amount: 9800.00,  category: "receita",      notes: "" },
-  { id: "t7",  accountId: "a1", date: daysAgo(3),  description: "TRF → C6 Casal",           amount: -2000.00, category: "transferencia", internalTransfer: true, linkedTx: "t8" },
-  { id: "t8",  accountId: "a4", date: daysAgo(3),  description: "TRF ← Rodrigo",            amount: 2000.00,  category: "transferencia", internalTransfer: true, linkedTx: "t7" },
-  { id: "t9",  accountId: "a4", date: daysAgo(4),  description: "Supermercado Pão de Açúcar",amount: -423.80,  category: "alimentacao",  notes: "" },
-  { id: "t10", accountId: "a2", date: daysAgo(5),  description: "Plano de Saúde Amil",      amount: -890.00,  category: "saude",        notes: "" },
-  { id: "t11", accountId: "a2", date: daysAgo(6),  description: "Colégio Dom Bosco",         amount: -1200.00, category: "educacao",     notes: "" },
-  { id: "t12", accountId: "a1", date: daysAgo(7),  description: "Shopee",                   amount: -145.00,  category: "vestuario",    notes: "" },
-  { id: "t13", accountId: "a3", date: daysAgo(8),  description: "Netflix",                  amount: -55.90,   category: "lazer",        notes: "" },
-  { id: "t14", accountId: "a2", date: daysAgo(9),  description: "Conta de Luz CEMIG",       amount: -320.00,  category: "moradia",      notes: "" },
-  { id: "t15", accountId: "a2", date: daysAgo(10), description: "Internet Vivo Fibra",      amount: -149.90,  category: "moradia",      notes: "" },
+// Generate rich 6-month historical mock data for reports
+function genHistoricalTxs() {
+  const seed = [
+    { desc:"Salário",           amt: 18500, cat:"receita",      acc:"a2", owner:"rodrigo", day:5  },
+    { desc:"Salário Cláudia",   amt: 9800,  cat:"receita",      acc:"a3", owner:"claudia", day:5  },
+    { desc:"Supermercado",      amt:-420,   cat:"alimentacao",  acc:"a4", owner:"casal",   day:8  },
+    { desc:"Posto Ipiranga",    amt:-180,   cat:"transporte",   acc:"a2", owner:"rodrigo", day:10 },
+    { desc:"Plano de Saúde",    amt:-890,   cat:"saude",        acc:"a2", owner:"rodrigo", day:12 },
+    { desc:"Colégio Dom Bosco", amt:-1200,  cat:"educacao",     acc:"a2", owner:"rodrigo", day:12 },
+    { desc:"iFood",             amt:-95,    cat:"alimentacao",  acc:"a1", owner:"rodrigo", day:14 },
+    { desc:"Netflix",           amt:-56,    cat:"lazer",        acc:"a3", owner:"claudia", day:15 },
+    { desc:"Conta de Luz",      amt:-310,   cat:"moradia",      acc:"a2", owner:"rodrigo", day:17 },
+    { desc:"Internet Vivo",     amt:-150,   cat:"moradia",      acc:"a2", owner:"rodrigo", day:17 },
+    { desc:"Farmácia",          amt:-85,    cat:"saude",        acc:"a3", owner:"claudia", day:20 },
+    { desc:"Restaurante",       amt:-140,   cat:"alimentacao",  acc:"a4", owner:"casal",   day:22 },
+    { desc:"Uber",              amt:-45,    cat:"transporte",   acc:"a3", owner:"claudia", day:24 },
+    { desc:"Padaria",           amt:-32,    cat:"alimentacao",  acc:"a1", owner:"rodrigo", day:26 },
+  ];
+  const txs = [];
+  for (let m = 5; m >= 0; m--) {
+    const base = new Date(TODAY.getFullYear(), TODAY.getMonth() - m, 1);
+    seed.forEach((s, si) => {
+      const jitter = (Math.sin((m+1)*(si+7)*13.7)*0.15);
+      const amt = Math.round(s.amt * (1 + jitter) * 100) / 100;
+      const d = new Date(base.getFullYear(), base.getMonth(), s.day);
+      txs.push({
+        id: `h_${m}_${si}`,
+        accountId: s.acc,
+        date: fmt(d),
+        description: s.desc,
+        amount: amt,
+        category: s.cat,
+        notes: "",
+        internalTransfer: false,
+      });
+    });
+  }
+  return txs;
+}
+
+const MOCK_ACCOUNTS = [
+  { id: "a1", name: "Nubank - Rodrigo",  type: "corrente",     owner: "rodrigo", balance: 8420.50,  color: C.purple },
+  { id: "a2", name: "Itaú - Rodrigo",    type: "corrente",     owner: "rodrigo", balance: 15230.00, color: C.gold   },
+  { id: "a3", name: "Nubank - Cláudia",  type: "corrente",     owner: "claudia", balance: 5870.30,  color: C.pink   },
+  { id: "a4", name: "C6 Casal",          type: "corrente",     owner: "casal",   balance: 3200.00,  color: C.green  },
+  { id: "a5", name: "XP Investimentos",  type: "investimento", owner: "rodrigo", balance: 42000.00, color: C.blue   },
 ];
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-const fmt_brl = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
-const fmt_date = (s) => new Date(s + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-const cat_of = (id) => DEFAULT_CATEGORIES.find(c => c.id === id) || DEFAULT_CATEGORIES.at(-1);
+const MOCK_TXS = [
+  ...genHistoricalTxs(),
+  { id:"t1",  accountId:"a1", date:daysAgo(0),  description:"Padaria São José",          amount:-28.50,   category:"alimentacao",  notes:"", internalTransfer:false },
+  { id:"t2",  accountId:"a2", date:daysAgo(1),  description:"Posto Ipiranga",             amount:-180.00,  category:"transporte",   notes:"", internalTransfer:false },
+  { id:"t3",  accountId:"a1", date:daysAgo(1),  description:"iFood",                     amount:-67.30,   category:"alimentacao",  notes:"", internalTransfer:false },
+  { id:"t4",  accountId:"a3", date:daysAgo(2),  description:"Farmácia Drogasil",          amount:-95.00,   category:"saude",        notes:"", internalTransfer:false },
+  { id:"t5",  accountId:"a2", date:daysAgo(2),  description:"Salário",                   amount:18500.00, category:"receita",      notes:"", internalTransfer:false },
+  { id:"t6",  accountId:"a3", date:daysAgo(3),  description:"Salário Cláudia",           amount:9800.00,  category:"receita",      notes:"", internalTransfer:false },
+  { id:"t7",  accountId:"a1", date:daysAgo(3),  description:"TRF → C6 Casal",            amount:-2000.00, category:"transferencia",notes:"", internalTransfer:true, linkedTx:"t8" },
+  { id:"t8",  accountId:"a4", date:daysAgo(3),  description:"TRF ← Rodrigo",             amount:2000.00,  category:"transferencia",notes:"", internalTransfer:true, linkedTx:"t7" },
+  { id:"t9",  accountId:"a4", date:daysAgo(4),  description:"Supermercado Pão de Açúcar",amount:-423.80,  category:"alimentacao",  notes:"", internalTransfer:false },
+  { id:"t10", accountId:"a2", date:daysAgo(5),  description:"Plano de Saúde Amil",       amount:-890.00,  category:"saude",        notes:"", internalTransfer:false },
+  { id:"t11", accountId:"a2", date:daysAgo(6),  description:"Colégio Dom Bosco",          amount:-1200.00, category:"educacao",     notes:"", internalTransfer:false },
+  { id:"t12", accountId:"a1", date:daysAgo(7),  description:"Shopee",                    amount:-145.00,  category:"vestuario",    notes:"", internalTransfer:false },
+  { id:"t13", accountId:"a3", date:daysAgo(8),  description:"Netflix",                   amount:-55.90,   category:"lazer",        notes:"", internalTransfer:false },
+  { id:"t14", accountId:"a2", date:daysAgo(9),  description:"Conta de Luz CEMIG",        amount:-320.00,  category:"moradia",      notes:"", internalTransfer:false },
+  { id:"t15", accountId:"a2", date:daysAgo(10), description:"Internet Vivo Fibra",       amount:-149.90,  category:"moradia",      notes:"", internalTransfer:false },
+];
 
-// ─── MINI COMPONENTS ─────────────────────────────────────────────────────────
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+const brl   = (v) => new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(v);
+const fdate = (s) => new Date(s+"T12:00:00").toLocaleDateString("pt-BR", { day:"2-digit", month:"short" });
+const catOf = (id) => DEFAULT_CATEGORIES.find(c => c.id === id) || DEFAULT_CATEGORIES.at(-1);
+const ownerLabel = { rodrigo:"👨 Rodrigo", claudia:"👩 Cláudia", casal:"💑 Casal" };
+const typeLabel  = { corrente:"Conta Corrente", poupanca:"Poupança", cartao:"Cartão de Crédito", investimento:"Investimento" };
+
+// detect internal transfer between known accounts
+function detectInternalTransfer(desc, accounts) {
+  const d = desc.toLowerCase();
+  const keywords = ["trf", "transferência", "transferencia", "pix", "ted"];
+  const isTransfer = keywords.some(k => d.includes(k));
+  if (!isTransfer) return false;
+  // check if any account name / owner appears in description
+  const names = accounts.flatMap(a => [a.name.toLowerCase(), a.owner.toLowerCase()]);
+  return names.some(n => d.includes(n) || n.includes("claudia") && (d.includes("claudia") || d.includes("cláudia")) || n.includes("rodrigo") && d.includes("rodrigo"));
+}
+
+// ─── API ───────────────────────────────────────────────────────────────────────
+async function callClaude(prompt, imageBase64 = null, imageMime = null) {
+  const content = [];
+  if (imageBase64) content.push({ type:"image", source:{ type:"base64", media_type: imageMime || "image/jpeg", data: imageBase64 } });
+  content.push({ type:"text", text: prompt });
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{ role:"user", content }] })
+  });
+  const d = await r.json();
+  return d.content?.[0]?.text || "";
+}
+
+async function classifyTx(description) {
+  const text = await callClaude(
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, transferencia, receita, outros`
+  );
+  const id = text.trim().toLowerCase();
+  return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
+}
+
+async function ocrComprovante(base64, mime) {
+  const text = await callClaude(
+    `Você recebeu uma imagem de um comprovante, nota fiscal, cupom fiscal ou recibo brasileiro.
+Extraia as informações e responda APENAS em JSON válido, sem markdown, sem explicação, exatamente neste formato:
+{"data":"YYYY-MM-DD","valor":0.00,"estabelecimento":"nome do local","categoria":"alimentacao|transporte|saude|educacao|lazer|moradia|vestuario|financeiro|outros","descricao":"descrição curta"}
+
+Se não conseguir identificar algum campo, use null. Responda SOMENTE o JSON.`,
+    base64, mime
+  );
+  try {
+    const clean = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  } catch { return null; }
+}
+
+// ─── MINI COMPONENTS ──────────────────────────────────────────────────────────
 const Badge = ({ children, color }) => (
-  <span style={{
-    background: color + "22", color, border: `1px solid ${color}44`,
-    borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 500,
-    fontFamily: "'DM Sans', sans-serif", whiteSpace: "nowrap"
-  }}>{children}</span>
-);
-
-const Chip = ({ icon, label, color }) => (
-  <span style={{ display: "inline-flex", alignItems: "center", gap: 4,
-    background: color + "18", color, borderRadius: 20, padding: "3px 10px",
-    fontSize: 12, fontWeight: 500, fontFamily: "'DM Sans', sans-serif" }}>
-    <span>{icon}</span>{label}
+  <span style={{ background:color+"22", color, border:`1px solid ${color}44`, borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:500, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap" }}>
+    {children}
   </span>
 );
 
-const Divider = () => <div style={{ height: 1, background: C.border, margin: "0" }} />;
+const Chip = ({ icon, label, color }) => (
+  <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:color+"18", color, borderRadius:20, padding:"3px 10px", fontSize:12, fontWeight:500, fontFamily:"'DM Sans',sans-serif" }}>
+    {icon} {label}
+  </span>
+);
+
+const Divider = () => <div style={{ height:1, background:C.border }} />;
 
 const StatCard = ({ label, value, sub, color, icon }) => (
-  <div style={{
-    background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
-    padding: "20px 24px", display: "flex", flexDirection: "column", gap: 6,
-    position: "relative", overflow: "hidden"
-  }}>
-    <div style={{ position: "absolute", top: 16, right: 20, fontSize: 22, opacity: .18 }}>{icon}</div>
-    <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans', sans-serif", textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
-    <div style={{ fontSize: 26, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, color: color || C.text, lineHeight: 1 }}>{value}</div>
-    {sub && <div style={{ fontSize: 12, color: C.soft, fontFamily: "'DM Sans', sans-serif" }}>{sub}</div>}
+  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px", display:"flex", flexDirection:"column", gap:6, position:"relative", overflow:"hidden" }}>
+    <div style={{ position:"absolute", top:16, right:20, fontSize:22, opacity:.15 }}>{icon}</div>
+    <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif" }}>{label}</div>
+    <div style={{ fontSize:26, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:color||C.text, lineHeight:1 }}>{value}</div>
+    {sub && <div style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{sub}</div>}
   </div>
 );
 
-// ─── SUPABASE CONFIG MODAL ────────────────────────────────────────────────────
-const SupabaseConfig = ({ onSave }) => {
+const Toast = ({ msg, type }) => (
+  <div style={{ position:"fixed", bottom:28, right:28, background: type==="error" ? C.red : type==="warn" ? C.gold : C.green,
+    color: type==="warn" ? C.bg : "#fff", borderRadius:10, padding:"12px 20px", fontSize:13,
+    fontFamily:"'DM Sans',sans-serif", zIndex:999, boxShadow:"0 4px 24px #0008", maxWidth:360 }}>
+    {msg}
+  </div>
+);
+
+// ─── INPUT STYLE ──────────────────────────────────────────────────────────────
+const IS = { background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, color:C.text, padding:"9px 13px", fontSize:13, fontFamily:"'DM Sans',sans-serif", outline:"none", boxSizing:"border-box", width:"100%" };
+
+// ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
+const SupabaseConfig = ({ onSave, onClose }) => {
   const [url, setUrl] = useState(localStorage.getItem("sb_url") || "");
   const [key, setKey] = useState(localStorage.getItem("sb_key") || "");
-  const inputStyle = {
-    width: "100%", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
-    color: C.text, padding: "10px 14px", fontSize: 13, fontFamily: "'DM Sans', sans-serif",
-    outline: "none", boxSizing: "border-box"
+  const [testing, setTesting] = useState(false);
+  const [status, setStatus]   = useState(null);
+
+  const test = async () => {
+    setTesting(true); setStatus(null);
+    try {
+      const r = await fetch(`${url}/rest/v1/transactions?select=id&limit=1`, { headers:{ apikey:key, Authorization:`Bearer ${key}` } });
+      setStatus(r.ok ? "ok" : "fail_" + r.status);
+    } catch { setStatus("fail_net"); }
+    setTesting(false);
   };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 40, width: 440, maxWidth: "90vw" }}>
-        <div style={{ fontSize: 11, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", marginBottom: 8 }}>Configuração</div>
-        <div style={{ fontSize: 28, fontFamily: "'Cormorant Garamond', serif", color: C.text, marginBottom: 8 }}>Conectar ao Supabase</div>
-        <div style={{ fontSize: 13, color: C.muted, fontFamily: "'DM Sans', sans-serif", marginBottom: 28 }}>Cole as credenciais do seu projeto para ativar o banco de dados. Por enquanto o app roda com dados de demonstração.</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, fontFamily: "'DM Sans', sans-serif" }}>PROJECT URL</div>
-            <input style={inputStyle} placeholder="https://xxxx.supabase.co" value={url} onChange={e => setUrl(e.target.value)} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 6, fontFamily: "'DM Sans', sans-serif" }}>ANON KEY</div>
-            <input style={inputStyle} placeholder="eyJ..." value={key} onChange={e => setKey(e.target.value)} />
-          </div>
+    <div style={{ position:"fixed", inset:0, background:"#000b", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200 }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:40, width:480, maxWidth:"95vw" }}>
+        <div style={{ fontSize:11, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Configuração</div>
+        <div style={{ fontSize:26, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:6 }}>Conectar ao Supabase</div>
+        <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:24 }}>
+          Cole as credenciais do seu projeto. Sem isso o app usa dados de demonstração.<br/>
+          <span style={{ color:C.goldDim }}>
+            Schema necessário: tabelas <code style={{background:C.bg,padding:"1px 5px",borderRadius:4}}>accounts</code> e <code style={{background:C.bg,padding:"1px 5px",borderRadius:4}}>transactions</code>
+          </span>
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
-          <button onClick={() => onSave(url, key)} style={{
-            flex: 1, background: C.gold, color: C.bg, border: "none", borderRadius: 8,
-            padding: "12px 0", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-          }}>Salvar e conectar</button>
-          <button onClick={() => onSave("", "")} style={{
-            flex: 1, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: "12px 0", fontSize: 13, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-          }}>Usar demo</button>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>PROJECT URL</div>
+            <input style={IS} placeholder="https://xxxx.supabase.co" value={url} onChange={e=>setUrl(e.target.value)} /></div>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>ANON KEY</div>
+            <input style={IS} placeholder="eyJ..." value={key} onChange={e=>setKey(e.target.value)} /></div>
+        </div>
+        {status && <div style={{ marginTop:12, fontSize:12, fontFamily:"'DM Sans',sans-serif", color: status==="ok" ? C.green : C.red }}>
+          {status==="ok" ? "✅ Conexão bem-sucedida!" : status.startsWith("fail_net") ? "❌ Erro de rede. Verifique a URL." : `❌ Erro ${status.replace("fail_","")}. Verifique a chave.`}
+        </div>}
+        <div style={{ display:"flex", gap:10, marginTop:20 }}>
+          <button onClick={test} disabled={!url||!key||testing} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8, padding:"11px 16px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+            {testing ? "Testando..." : "Testar"}
+          </button>
+          <button onClick={() => { localStorage.setItem("sb_url",url); localStorage.setItem("sb_key",key); _sb=null; onSave(); }} style={{ flex:1, background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"11px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+            Salvar e conectar
+          </button>
+          <button onClick={onClose} style={{ background:"transparent", color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, padding:"11px 16px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+            Cancelar
+          </button>
         </div>
       </div>
     </div>
@@ -146,201 +290,599 @@ const SupabaseConfig = ({ onSave }) => {
 
 // ─── TRANSACTION FORM ─────────────────────────────────────────────────────────
 const TxForm = ({ accounts, onSave, onClose, initial }) => {
-  const [form, setForm] = useState(initial || {
-    accountId: accounts[0]?.id || "", date: fmt(TODAY),
-    description: "", amount: "", category: "outros", notes: "", type: "despesa"
-  });
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const inputStyle = {
-    width: "100%", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
-    color: C.text, padding: "10px 14px", fontSize: 13, fontFamily: "'DM Sans', sans-serif",
-    outline: "none", boxSizing: "border-box"
-  };
+  const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"", type:"despesa", internalTransfer:false };
+  const [form, setForm] = useState(initial ? { ...initial, type: initial.amount>0?"receita": initial.internalTransfer?"transferencia":"despesa", amount: Math.abs(initial.amount).toString() } : blank);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
   const handleSave = () => {
-    if (!form.description || !form.amount) return;
-    const amt = parseFloat(form.amount.replace(",", "."));
-    onSave({ ...form, id: initial?.id || "tx_" + Date.now(), amount: form.type === "despesa" ? -Math.abs(amt) : Math.abs(amt) });
+    if (!form.description.trim() || !form.amount) return;
+    const amt = parseFloat(form.amount.replace(",","."));
+    if (isNaN(amt)) return;
+    onSave({ ...form, id:initial?.id||("tx_"+Date.now()), amount: form.type==="receita" ? Math.abs(amt) : -Math.abs(amt), internalTransfer: form.type==="transferencia" });
   };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000b", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 36, width: 480, maxWidth: "95vw" }}>
-        <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond', serif", color: C.text, marginBottom: 24 }}>
+    <div style={{ position:"fixed", inset:0, background:"#000b", display:"flex", alignItems:"center", justifyContent:"center", zIndex:150 }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:36, width:500, maxWidth:"95vw" }}>
+        <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:24 }}>
           {initial ? "Editar lançamento" : "Novo lançamento"}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
           {/* Tipo */}
-          <div style={{ gridColumn: "1/-1", display: "flex", gap: 8 }}>
-            {["despesa","receita","transferencia"].map(t => (
-              <button key={t} onClick={() => set("type", t)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 8, fontSize: 12, fontWeight: 500,
-                fontFamily: "'DM Sans', sans-serif", cursor: "pointer",
-                background: form.type === t ? (t === "receita" ? C.green : t === "transferencia" ? C.blue : C.red) + "22" : "transparent",
-                border: `1px solid ${form.type === t ? (t === "receita" ? C.green : t === "transferencia" ? C.blue : C.red) : C.border}`,
-                color: form.type === t ? (t === "receita" ? C.green : t === "transferencia" ? C.blue : C.red) : C.muted
-              }}>
-                {t === "despesa" ? "💸 Despesa" : t === "receita" ? "💰 Receita" : "🔄 Transferência"}
-              </button>
+          <div style={{ gridColumn:"1/-1", display:"flex", gap:8 }}>
+            {[["despesa","💸 Despesa",C.red],["receita","💰 Receita",C.green],["transferencia","🔄 Transferência",C.blue]].map(([t,l,col])=>(
+              <button key={t} onClick={()=>set("type",t)} style={{ flex:1, padding:"9px 0", borderRadius:8, fontSize:12, fontWeight:500, fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+                background: form.type===t ? col+"22" : "transparent",
+                border:`1px solid ${form.type===t ? col : C.border}`,
+                color: form.type===t ? col : C.muted }}>{l}</button>
             ))}
           </div>
-          {/* Conta */}
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>CONTA</div>
-            <select style={inputStyle} value={form.accountId} onChange={e => set("accountId", e.target.value)}>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
-          {/* Data */}
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>DATA</div>
-            <input type="date" style={inputStyle} value={form.date} onChange={e => set("date", e.target.value)} />
-          </div>
-          {/* Descrição */}
-          <div style={{ gridColumn: "1/-1" }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>DESCRIÇÃO</div>
-            <input style={inputStyle} placeholder="Ex: Supermercado" value={form.description} onChange={e => set("description", e.target.value)} />
-          </div>
-          {/* Valor */}
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>VALOR (R$)</div>
-            <input style={inputStyle} placeholder="0,00" value={form.amount} onChange={e => set("amount", e.target.value)} />
-          </div>
-          {/* Categoria */}
-          <div>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>CATEGORIA</div>
-            <select style={inputStyle} value={form.category} onChange={e => set("category", e.target.value)}>
-              {DEFAULT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-            </select>
-          </div>
-          {/* Notas */}
-          <div style={{ gridColumn: "1/-1" }}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>NOTAS (opcional)</div>
-            <input style={inputStyle} placeholder="Observações..." value={form.notes} onChange={e => set("notes", e.target.value)} />
-          </div>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CONTA</div>
+            <select style={IS} value={form.accountId} onChange={e=>set("accountId",e.target.value)}>
+              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+            </select></div>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>DATA</div>
+            <input type="date" style={IS} value={form.date} onChange={e=>set("date",e.target.value)} /></div>
+          <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>DESCRIÇÃO</div>
+            <input style={IS} placeholder="Ex: Supermercado" value={form.description} onChange={e=>set("description",e.target.value)} /></div>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VALOR (R$)</div>
+            <input style={IS} placeholder="0,00" value={form.amount} onChange={e=>set("amount",e.target.value)} /></div>
+          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CATEGORIA</div>
+            <select style={IS} value={form.category} onChange={e=>set("category",e.target.value)}>
+              {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select></div>
+          <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>NOTAS</div>
+            <input style={IS} placeholder="Observações..." value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
-          <button onClick={handleSave} style={{
-            flex: 1, background: C.gold, color: C.bg, border: "none", borderRadius: 8,
-            padding: "12px 0", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-          }}>Salvar</button>
-          <button onClick={onClose} style={{
-            background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: "12px 20px", fontSize: 13, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-          }}>Cancelar</button>
+        <div style={{ display:"flex", gap:10, marginTop:24 }}>
+          <button onClick={handleSave} style={{ flex:1, background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"12px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Salvar</button>
+          <button onClick={onClose} style={{ background:"transparent", color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 20px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Cancelar</button>
         </div>
       </div>
     </div>
   );
 };
 
-// ─── AI CLASSIFIER ────────────────────────────────────────────────────────────
-const classifyWithAI = async (description) => {
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 100,
-        messages: [{
-          role: "user",
-          content: `Classifique esta transação financeira brasileira em UMA das categorias abaixo. Responda APENAS com o id da categoria, sem mais nada.
+// ─── SVG CHARTS ───────────────────────────────────────────────────────────────
+// Line/Area chart — pure SVG, no deps
+const AreaChart = ({ series, labels, height=180, showLegend=true }) => {
+  const W = 620, H = height, PL = 52, PR = 16, PT = 16, PB = 32;
+  const iW = W - PL - PR, iH = H - PT - PB;
+  const allVals = series.flatMap(s => s.data);
+  const minV = Math.min(0, ...allVals), maxV = Math.max(...allVals, 1);
+  const range = maxV - minV || 1;
+  const xOf = (i) => PL + (i / (labels.length - 1)) * iW;
+  const yOf = (v) => PT + iH - ((v - minV) / range) * iH;
 
-Transação: "${description}"
+  const pathD = (data) => data.map((v,i) => `${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+  const areaD = (data) => `${pathD(data)} L${xOf(data.length-1).toFixed(1)},${(PT+iH).toFixed(1)} L${PL.toFixed(1)},${(PT+iH).toFixed(1)} Z`;
 
-Categorias disponíveis:
-- alimentacao (padaria, restaurante, mercado, ifood, uber eats, açougue)
-- transporte (posto, gasolina, uber, combustível, pedágio, estacionamento)
-- saude (farmácia, hospital, plano de saúde, médico, dentista, exame)
-- educacao (escola, faculdade, curso, livro, material escolar)
-- lazer (streaming, cinema, viagem, hotel, esporte, netflix, spotify)
-- moradia (aluguel, condomínio, luz, água, internet, gás, reforma)
-- vestuario (roupa, sapato, loja, shopping)
-- financeiro (cartão de crédito, empréstimo, financiamento, seguro)
-- transferencia (TED, PIX, transferência)
-- receita (salário, freelance, aluguel recebido, dividendo)
-- outros (qualquer outra coisa)
-
-Responda apenas o id:`
-        }]
-      })
-    });
-    const data = await res.json();
-    const cat = data.content?.[0]?.text?.trim().toLowerCase();
-    return DEFAULT_CATEGORIES.find(c => c.id === cat)?.id || "outros";
-  } catch { return "outros"; }
-};
-
-// ─── VIEWS ────────────────────────────────────────────────────────────────────
-
-// DASHBOARD
-const Dashboard = ({ transactions, accounts }) => {
-  const thisMonth = transactions.filter(t => t.date.startsWith(fmt(TODAY).slice(0, 7)));
-  const receitas  = thisMonth.filter(t => t.amount > 0 && !t.internalTransfer).reduce((s, t) => s + t.amount, 0);
-  const despesas  = thisMonth.filter(t => t.amount < 0 && !t.internalTransfer).reduce((s, t) => s + t.amount, 0);
-  const saldoTotal = accounts.reduce((s, a) => s + a.balance, 0);
-  const saldoInvest = accounts.filter(a => a.type === "investimento").reduce((s, a) => s + a.balance, 0);
-
-  // Gastos por categoria
-  const byCat = {};
-  thisMonth.filter(t => t.amount < 0 && !t.internalTransfer).forEach(t => {
-    byCat[t.category] = (byCat[t.category] || 0) + Math.abs(t.amount);
-  });
-  const catRanking = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const maxCat = catRanking[0]?.[1] || 1;
-
-  // Últimos lançamentos
-  const recent = [...transactions].filter(t => !t.internalTransfer).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+  const yTicks = 4;
+  const gridLines = Array.from({length:yTicks+1},(_,i)=> minV + (range/yTicks)*i);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
-        <StatCard label="Patrimônio total" value={fmt_brl(saldoTotal)} sub="todas as contas" icon="🏦" color={C.goldLight} />
-        <StatCard label="Receitas do mês"  value={fmt_brl(receitas)}  sub={new Date().toLocaleString("pt-BR",{month:"long"})} icon="📈" color={C.green} />
-        <StatCard label="Despesas do mês"  value={fmt_brl(Math.abs(despesas))} sub="sem transf. internas" icon="📉" color={C.red} />
-        <StatCard label="Investimentos"    value={fmt_brl(saldoInvest)} sub="XP e corretoras" icon="💼" color={C.blue} />
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",overflow:"visible"}}>
+      <defs>
+        {series.map((s,si) => (
+          <linearGradient key={si} id={`ag${si}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={s.color} stopOpacity="0.25"/>
+            <stop offset="100%" stopColor={s.color} stopOpacity="0.02"/>
+          </linearGradient>
+        ))}
+      </defs>
+      {/* grid */}
+      {gridLines.map((v,i) => (
+        <g key={i}>
+          <line x1={PL} x2={W-PR} y1={yOf(v)} y2={yOf(v)} stroke={C.border} strokeWidth="1"/>
+          <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="9" fill={C.muted} fontFamily="DM Sans,sans-serif">
+            {Math.abs(v)>=1000?`${(v/1000).toFixed(0)}k`:v.toFixed(0)}
+          </text>
+        </g>
+      ))}
+      {/* zero line */}
+      {minV < 0 && <line x1={PL} x2={W-PR} y1={yOf(0)} y2={yOf(0)} stroke={C.soft} strokeWidth="1" strokeDasharray="4,3"/>}
+      {/* areas */}
+      {series.map((s,si) => <path key={`a${si}`} d={areaD(s.data)} fill={`url(#ag${si})`}/>)}
+      {/* lines */}
+      {series.map((s,si) => <path key={`l${si}`} d={pathD(s.data)} fill="none" stroke={s.color} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"/>)}
+      {/* dots on hover via title */}
+      {series.map((s,si) => s.data.map((v,i) => (
+        <circle key={`d${si}_${i}`} cx={xOf(i)} cy={yOf(v)} r="3.5" fill={s.color} stroke={C.card} strokeWidth="1.5">
+          <title>{labels[i]}: {brl(v)}</title>
+        </circle>
+      )))}
+      {/* x labels */}
+      {labels.map((l,i) => (
+        <text key={i} x={xOf(i)} y={H-6} textAnchor="middle" fontSize="10" fill={C.muted} fontFamily="DM Sans,sans-serif">{l}</text>
+      ))}
+      {/* legend */}
+      {showLegend && series.map((s,si) => (
+        <g key={`leg${si}`} transform={`translate(${PL + si*140}, ${H-4})`}>
+          <rect x={0} y={-10} width={10} height={4} rx="2" fill={s.color}/>
+          <text x={14} y={-7} fontSize="10" fill={C.soft} fontFamily="DM Sans,sans-serif">{s.label}</text>
+        </g>
+      ))}
+    </svg>
+  );
+};
+
+// Donut chart
+const DonutChart = ({ slices, size=160 }) => {
+  const cx = size/2, cy = size/2, R = size*0.38, r = size*0.22;
+  const total = slices.reduce((s,x)=>s+x.value,0)||1;
+  let angle = -Math.PI/2;
+  const paths = slices.map(sl => {
+    const a = (sl.value/total)*Math.PI*2;
+    const x1 = cx+R*Math.cos(angle), y1 = cy+R*Math.sin(angle);
+    angle += a;
+    const x2 = cx+R*Math.cos(angle), y2 = cy+R*Math.sin(angle);
+    const xi1 = cx+r*Math.cos(angle-a), yi1 = cy+r*Math.sin(angle-a);
+    const xi2 = cx+r*Math.cos(angle),   yi2 = cy+r*Math.sin(angle);
+    const lg = a > Math.PI ? 1 : 0;
+    return { ...sl, d:`M${x1},${y1} A${R},${R} 0 ${lg},1 ${x2},${y2} L${xi2},${yi2} A${r},${r} 0 ${lg},0 ${xi1},${yi1} Z` };
+  });
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} style={{width:size,height:size,flexShrink:0}}>
+      {paths.map((p,i) => <path key={i} d={p.d} fill={p.color} opacity="0.9"><title>{p.label}: {brl(p.value)} ({(p.value/total*100).toFixed(0)}%)</title></path>)}
+    </svg>
+  );
+};
+
+// Bar chart (vertical)
+const BarChart = ({ data, height=160 }) => {
+  const W=560, H=height, PL=46, PR=10, PT=10, PB=28;
+  const iW=W-PL-PR, iH=H-PT-PB;
+  const maxV = Math.max(...data.map(d=>Math.abs(d.value)),1);
+  const bw = Math.max(4, iW/data.length - 8);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto"}}>
+      {[0,.25,.5,.75,1].map(t=>{
+        const y = PT + iH*(1-t);
+        return <g key={t}>
+          <line x1={PL} x2={W-PR} y1={y} y2={y} stroke={C.border} strokeWidth="1"/>
+          <text x={PL-5} y={y+4} textAnchor="end" fontSize="9" fill={C.muted} fontFamily="DM Sans,sans-serif">
+            {(maxV*t)>=1000?`${((maxV*t)/1000).toFixed(0)}k`:(maxV*t).toFixed(0)}
+          </text>
+        </g>;
+      })}
+      {data.map((d,i)=>{
+        const bh = (Math.abs(d.value)/maxV)*iH;
+        const x = PL + (iW/data.length)*i + (iW/data.length - bw)/2;
+        const y = PT+iH-bh;
+        return <g key={i}>
+          <rect x={x} y={y} width={bw} height={bh} rx="3" fill={d.color||C.gold} opacity="0.85">
+            <title>{d.label}: {brl(d.value)}</title>
+          </rect>
+          <text x={x+bw/2} y={H-8} textAnchor="middle" fontSize="9" fill={C.muted} fontFamily="DM Sans,sans-serif">{d.label}</text>
+        </g>;
+      })}
+    </svg>
+  );
+};
+
+// ─── EXPORT CSV ───────────────────────────────────────────────────────────────
+function exportCSV(transactions, accounts, period) {
+  const rows = transactions
+    .filter(t => !period || t.date.startsWith(period))
+    .sort((a,b)=>a.date.localeCompare(b.date));
+  const acc = (id) => accounts.find(a=>a.id===id)?.name||id;
+  const header = "Data;Descrição;Conta;Categoria;Valor;Transferência Interna;Notas";
+  const lines = rows.map(t =>
+    [t.date, `"${t.description}"`, `"${acc(t.accountId)}"`, t.category,
+     t.amount.toFixed(2).replace(".",","), t.internalTransfer?"Sim":"Não", `"${t.notes||""}"`].join(";")
+  );
+  const csv = [header,...lines].join("\n");
+  const blob = new Blob(["\uFEFF"+csv], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download=`relatorio_fontanezzi_${period||"completo"}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── RELATORIOS ───────────────────────────────────────────────────────────────
+const Relatorios = ({ transactions, accounts }) => {
+  const [tab, setTab] = useState("tendencia"); // tendencia | categorias | pessoa | mensal
+  const [year, setYear] = useState(String(TODAY.getFullYear()));
+
+  // Build monthly summaries for selected year
+  const months = Array.from({length:12},(_,i)=>{
+    const m = String(i+1).padStart(2,"0");
+    const key = `${year}-${m}`;
+    const mTxs = transactions.filter(t=>t.date.startsWith(key)&&!t.internalTransfer);
+    const rec  = mTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const des  = mTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    const sal  = rec-des;
+    return { key, label:new Date(parseInt(year),i,1).toLocaleDateString("pt-BR",{month:"short"}), rec, des, sal, txs:mTxs };
+  });
+
+  const availMonths = months.filter(m=>m.txs.length>0);
+  const labels = months.map(m=>m.label);
+
+  // Category breakdown — all year
+  const yearTxs = transactions.filter(t=>t.date.startsWith(year)&&t.amount<0&&!t.internalTransfer);
+  const byCat = {};
+  yearTxs.forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
+  const catSlices = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
+  const catTotal = catSlices.reduce((s,c)=>s+c.value,0)||1;
+
+  // By person
+  const byOwner = {};
+  transactions.filter(t=>t.date.startsWith(year)&&t.amount<0&&!t.internalTransfer).forEach(t=>{
+    const acc = accounts.find(a=>a.id===t.accountId);
+    const o = acc?.owner||"outros";
+    byOwner[o]=(byOwner[o]||0)+Math.abs(t.amount);
+  });
+
+  // Yearly totals
+  const totRec = months.reduce((s,m)=>s+m.rec,0);
+  const totDes = months.reduce((s,m)=>s+m.des,0);
+  const avgSal = availMonths.length ? (totRec-totDes)/availMonths.length : 0;
+
+  // Months with most/least spending
+  const activeMths = months.filter(m=>m.des>0);
+  const maxMth = activeMths.reduce((a,b)=>b.des>a.des?b:a, activeMths[0]||months[0]);
+  const minMth = activeMths.reduce((a,b)=>b.des<a.des?b:a, activeMths[0]||months[0]);
+
+  const tabBtn = (id, label) => (
+    <button onClick={()=>setTab(id)} style={{
+      padding:"8px 18px", borderRadius:8, fontSize:12, fontWeight:500,
+      fontFamily:"'DM Sans',sans-serif", cursor:"pointer", border:"none",
+      background: tab===id ? C.gold+"22" : "transparent",
+      color: tab===id ? C.goldLight : C.muted,
+      borderBottom: tab===id ? `2px solid ${C.gold}` : "2px solid transparent",
+    }}>{label}</button>
+  );
+
+  const Card = ({children, style={}}) => (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24, ...style }}>{children}</div>
+  );
+  const SectionTitle = ({children}) => (
+    <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:16 }}>{children}</div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      {/* Header controls */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+        <div style={{ display:"flex", gap:2 }}>
+          {tabBtn("tendencia","📈 Tendência")}
+          {tabBtn("categorias","🍩 Categorias")}
+          {tabBtn("pessoa","👥 Por Pessoa")}
+          {tabBtn("mensal","📅 Mensal")}
+        </div>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <select style={{ ...IS, width:"auto", fontSize:12 }} value={year} onChange={e=>setYear(e.target.value)}>
+            {[0,1,2].map(d=>{ const y=String(TODAY.getFullYear()-d); return <option key={y} value={y}>{y}</option>; })}
+          </select>
+          <button onClick={()=>exportCSV(transactions,accounts,null)} style={{
+            background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
+            padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
+          }}>⬇ CSV</button>
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-        {/* Gastos por categoria */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
-          <div style={{ fontSize: 12, color: C.muted, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", marginBottom: 18 }}>Gastos por categoria</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {catRanking.map(([catId, val]) => {
-              const cat = cat_of(catId);
-              return (
-                <div key={catId}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 12, color: C.soft, fontFamily: "'DM Sans', sans-serif" }}>{cat.icon} {cat.label}</span>
-                    <span style={{ fontSize: 12, color: C.text, fontFamily: "'DM Sans', sans-serif" }}>{fmt_brl(val)}</span>
+      {/* KPIs do ano */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
+        <StatCard label={`Receitas ${year}`}  value={brl(totRec)}          icon="📈" color={C.green}     sub={`${availMonths.length} meses com dados`} />
+        <StatCard label={`Despesas ${year}`}  value={brl(totDes)}          icon="📉" color={C.red}       sub="excl. transferências" />
+        <StatCard label="Saldo acumulado"     value={brl(totRec-totDes)}   icon="💰" color={totRec-totDes>=0?C.goldLight:C.red} sub={year} />
+        <StatCard label="Economia média/mês"  value={brl(avgSal)}          icon="🎯" color={avgSal>=0?C.green:C.red} sub="receitas − despesas" />
+      </div>
+
+      {/* ─── TENDÊNCIA ─── */}
+      {tab==="tendencia" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          <Card>
+            <SectionTitle>Receitas × Despesas por mês — {year}</SectionTitle>
+            <AreaChart
+              series={[
+                { label:"Receitas", data:months.map(m=>m.rec), color:C.green },
+                { label:"Despesas", data:months.map(m=>m.des), color:C.red  },
+              ]}
+              labels={labels} height={200}
+            />
+          </Card>
+          <Card>
+            <SectionTitle>Saldo mensal (Receitas − Despesas)</SectionTitle>
+            <BarChart
+              data={months.map(m=>({ label:m.label, value:m.sal, color: m.sal>=0?C.green+"cc":C.red+"cc" }))}
+              height={150}
+            />
+          </Card>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <Card>
+              <SectionTitle>Mês de maior gasto</SectionTitle>
+              <div style={{ fontSize:28, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.red }}>{brl(maxMth?.des||0)}</div>
+              <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:4 }}>{maxMth?.label} {year}</div>
+            </Card>
+            <Card>
+              <SectionTitle>Mês de menor gasto</SectionTitle>
+              <div style={{ fontSize:28, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.green }}>{brl(minMth?.des||0)}</div>
+              <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:4 }}>{minMth?.label} {year}</div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* ─── CATEGORIAS ─── */}
+      {tab==="categorias" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          <Card>
+            <SectionTitle>Distribuição de gastos por categoria — {year}</SectionTitle>
+            <div style={{ display:"flex", gap:28, alignItems:"center", flexWrap:"wrap" }}>
+              <DonutChart slices={catSlices} size={180} />
+              <div style={{ flex:1, minWidth:200 }}>
+                {catSlices.map(c=>(
+                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                    <div style={{ width:10, height:10, borderRadius:3, background:c.color, flexShrink:0 }} />
+                    <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", flex:1 }}>{c.icon} {c.label}</span>
+                    <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.text }}>{brl(c.value)}</span>
+                    <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", minWidth:36, textAlign:"right" }}>{(c.value/catTotal*100).toFixed(0)}%</span>
                   </div>
-                  <div style={{ height: 4, background: C.border, borderRadius: 4 }}>
-                    <div style={{ height: "100%", width: `${(val / maxCat) * 100}%`, background: cat.color, borderRadius: 4, transition: "width .6s" }} />
-                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <SectionTitle>Evolução mensal por categoria (top 5)</SectionTitle>
+            <AreaChart
+              series={catSlices.slice(0,5).map(c=>({
+                label: c.label,
+                color: c.color,
+                data: months.map(m=>{
+                  return m.txs.filter(t=>t.category===c.id&&t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+                })
+              }))}
+              labels={labels} height={200}
+            />
+          </Card>
+        </div>
+      )}
+
+      {/* ─── POR PESSOA ─── */}
+      {tab==="pessoa" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14 }}>
+            {[["rodrigo",C.purple,"👨"],["claudia",C.pink,"👩"],["casal",C.green,"💑"]].map(([o,col,icon])=>(
+              <Card key={o}>
+                <SectionTitle>{icon} {o==="casal"?"Casal":o==="rodrigo"?"Rodrigo":"Cláudia"}</SectionTitle>
+                <div style={{ fontSize:28, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:col }}>{brl(byOwner[o]||0)}</div>
+                <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:4 }}>
+                  {((byOwner[o]||0)/totDes*100).toFixed(0)}% do total de gastos
                 </div>
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <SectionTitle>Gastos mensais por pessoa — {year}</SectionTitle>
+            <AreaChart
+              series={[
+                { label:"Rodrigo", color:C.purple, data:months.map(m=>m.txs.filter(t=>t.amount<0&&accounts.find(a=>a.id===t.accountId)?.owner==="rodrigo").reduce((s,t)=>s+Math.abs(t.amount),0)) },
+                { label:"Cláudia", color:C.pink,   data:months.map(m=>m.txs.filter(t=>t.amount<0&&accounts.find(a=>a.id===t.accountId)?.owner==="claudia").reduce((s,t)=>s+Math.abs(t.amount),0)) },
+                { label:"Casal",   color:C.green,  data:months.map(m=>m.txs.filter(t=>t.amount<0&&accounts.find(a=>a.id===t.accountId)?.owner==="casal").reduce((s,t)=>s+Math.abs(t.amount),0)) },
+              ]}
+              labels={labels} height={200}
+            />
+          </Card>
+          {/* per-person category breakdown */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            {[["rodrigo","👨 Rodrigo",C.purple],["claudia","👩 Cláudia",C.pink]].map(([owner,label,col])=>{
+              const oTxs = yearTxs.filter(t=>accounts.find(a=>a.id===t.accountId)?.owner===owner);
+              const oByCat = {};
+              oTxs.forEach(t=>{ oByCat[t.category]=(oByCat[t.category]||0)+Math.abs(t.amount); });
+              const top = Object.entries(oByCat).sort((a,b)=>b[1]-a[1]).slice(0,5);
+              const mx = top[0]?.[1]||1;
+              return (
+                <Card key={owner}>
+                  <SectionTitle>Top categorias — {label}</SectionTitle>
+                  {top.map(([id,val])=>{
+                    const cat = catOf(id);
+                    return (
+                      <div key={id} style={{ marginBottom:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                          <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{cat.icon} {cat.label}</span>
+                          <span style={{ fontSize:12, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{brl(val)}</span>
+                        </div>
+                        <div style={{ height:4, background:C.border, borderRadius:4 }}>
+                          <div style={{ height:"100%", width:`${val/mx*100}%`, background:col, borderRadius:4 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Card>
               );
             })}
           </div>
         </div>
+      )}
 
-        {/* Contas */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
-          <div style={{ fontSize: 12, color: C.muted, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", marginBottom: 18 }}>Contas</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {accounts.map(a => (
-              <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.color }} />
-                  <div>
-                    <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans', sans-serif" }}>{a.name}</div>
-                    <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans', sans-serif" }}>
-                      {a.type} · {a.owner === "casal" ? "💑 Casal" : a.owner === "rodrigo" ? "👨 Rodrigo" : "👩 Esposa"}
+      {/* ─── MENSAL ─── */}
+      {tab==="mensal" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          {months.filter(m=>m.txs.length>0).reverse().map(m=>{
+            const byCatM = {};
+            m.txs.filter(t=>t.amount<0).forEach(t=>{ byCatM[t.category]=(byCatM[t.category]||0)+Math.abs(t.amount); });
+            const topCats = Object.entries(byCatM).sort((a,b)=>b[1]-a[1]).slice(0,4);
+            return (
+              <Card key={m.key} style={{ padding:0, overflow:"hidden" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 24px", borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ fontSize:16, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:600, textTransform:"capitalize" }}>
+                    {new Date(m.key+"-15").toLocaleDateString("pt-BR",{month:"long",year:"numeric"})}
+                  </div>
+                  <div style={{ display:"flex", gap:20, alignItems:"center" }}>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>RECEITAS</div>
+                      <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.green }}>{brl(m.rec)}</div>
                     </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>DESPESAS</div>
+                      <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.red }}>{brl(m.des)}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>SALDO</div>
+                      <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:m.sal>=0?C.goldLight:C.red }}>{brl(m.sal)}</div>
+                    </div>
+                    <button onClick={()=>exportCSV(transactions,accounts,m.key)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"6px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>⬇ CSV</button>
                   </div>
                 </div>
-                <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond', serif", color: a.balance >= 0 ? C.text : C.red, fontWeight: 600 }}>
-                  {fmt_brl(a.balance)}
+                <div style={{ display:"flex", gap:0, padding:"14px 24px", flexWrap:"wrap" }}>
+                  {topCats.map(([id,val])=>{
+                    const cat = catOf(id);
+                    return (
+                      <div key={id} style={{ display:"flex", alignItems:"center", gap:8, marginRight:24 }}>
+                        <span style={{ fontSize:14 }}>{cat.icon}</span>
+                        <div>
+                          <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{cat.label}</div>
+                          <div style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:cat.color }}>{brl(val)}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginLeft:"auto", fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", alignSelf:"center" }}>
+                    {m.txs.length} lançamentos
+                  </div>
                 </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── METAS STORAGE ────────────────────────────────────────────────────────────
+const GOALS_KEY = "fontanezzi_goals";
+function loadGoals() { try { return JSON.parse(localStorage.getItem(GOALS_KEY)) || {}; } catch { return {}; } }
+function saveGoals(g) { localStorage.setItem(GOALS_KEY, JSON.stringify(g)); }
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+const Dashboard = ({ transactions, accounts, onNavigate }) => {
+  const month    = fmt(TODAY).slice(0,7);
+  const thisM    = transactions.filter(t => t.date.startsWith(month));
+  const receitas = thisM.filter(t=>t.amount>0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
+  const despesas = thisM.filter(t=>t.amount<0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
+  const total    = accounts.reduce((s,a)=>s+a.balance,0);
+  const invest   = accounts.filter(a=>a.type==="investimento").reduce((s,a)=>s+a.balance,0);
+  const cashBal  = (() => { try { return (JSON.parse(localStorage.getItem(CASH_STORAGE_KEY))||[]).reduce((s,t)=>s+t.amount,0); } catch { return 0; } })();
+
+  const byCat = {};
+  thisM.filter(t=>t.amount<0&&!t.internalTransfer).forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
+  const catR = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const maxC = catR[0]?.[1]||1;
+
+  const goals   = loadGoals();
+  const recent  = [...transactions].filter(t=>!t.internalTransfer).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7);
+  const byOwner = { rodrigo:0, claudia:0, casal:0 };
+  thisM.filter(t=>t.amount<0&&!t.internalTransfer).forEach(t=>{ const acc=accounts.find(a=>a.id===t.accountId); if(acc) byOwner[acc.owner]=(byOwner[acc.owner]||0)+Math.abs(t.amount); });
+
+  // Goals alerts
+  const alerts = catR.filter(([id,val])=>goals[id]&&val>goals[id]);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:24 }}>
+      {/* Alertas de metas */}
+      {alerts.length>0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {alerts.map(([id,val])=>{
+            const cat=catOf(id), lim=goals[id];
+            return (
+              <div key={id} style={{ background:C.red+"18", border:`1px solid ${C.red}44`, borderRadius:12, padding:"12px 18px", display:"flex", alignItems:"center", gap:12 }}>
+                <span style={{ fontSize:18 }}>{cat.icon}</span>
+                <div style={{ flex:1 }}>
+                  <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>
+                    <strong style={{color:C.red}}>{cat.label}</strong> ultrapassou a meta mensal —{" "}
+                    <span style={{color:C.red}}>{brl(val)}</span> de <span style={{color:C.muted}}>{brl(lim)}</span> ({Math.round(val/lim*100)}%)
+                  </span>
+                </div>
+                <button onClick={()=>onNavigate("metas")} style={{ background:"transparent", border:`1px solid ${C.red}55`, color:C.red, borderRadius:7, padding:"5px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                  Ver metas
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:12 }}>
+        <div onClick={()=>onNavigate("carteira")} style={{ cursor:"pointer" }}>
+          <StatCard label="Patrimônio total" value={brl(total+cashBal)} sub="contas + dinheiro" icon="🏦" color={C.goldLight} />
+        </div>
+        <StatCard label="Receitas do mês"   value={brl(receitas)}           sub={new Date().toLocaleString("pt-BR",{month:"long"})} icon="📈" color={C.green} />
+        <StatCard label="Despesas do mês"   value={brl(Math.abs(despesas))} sub="excl. transferências internas" icon="📉" color={C.red} />
+        <div onClick={()=>onNavigate("carteira")} style={{ cursor:"pointer" }}>
+          <StatCard label="Dinheiro em caixa" value={brl(cashBal)} sub="espécie · clique para detalhar" icon="💵" color={cashBal>=0?C.green:C.red} />
+        </div>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr", gap:18 }}>
+        {/* Categorias + metas */}
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>Gastos por categoria</div>
+            <button onClick={()=>onNavigate("metas")} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"4px 10px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+              🎯 Metas
+            </button>
+          </div>
+          {catR.length===0
+            ? <div style={{ color:C.muted, fontSize:13, fontFamily:"'DM Sans',sans-serif" }}>Sem despesas no mês.</div>
+            : catR.map(([id,val])=>{
+              const cat=catOf(id); const goal=goals[id]; const pct=goal?Math.min(val/goal*100,100):null;
+              const over=goal&&val>goal;
+              return (
+                <div key={id} style={{ marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{cat.icon} {cat.label}</span>
+                    <span style={{ fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>
+                      <span style={{ color: over?C.red:C.text }}>{brl(val)}</span>
+                      {goal && <span style={{ color:C.muted }}> / {brl(goal)}</span>}
+                    </span>
+                  </div>
+                  <div style={{ height:4, background:C.border, borderRadius:4 }}>
+                    {goal
+                      ? <div style={{ height:"100%", width:`${pct}%`, background: over?C.red:val/goal>0.8?C.gold:C.green, borderRadius:4, transition:"width .5s" }} />
+                      : <div style={{ height:"100%", width:`${val/maxC*100}%`, background:cat.color, borderRadius:4, transition:"width .5s" }} />
+                    }
+                  </div>
+                </div>
+              );
+            })}
+        </div>
+
+        {/* Contas + por pessoa */}
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:22, flex:1 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>Contas</div>
+              <button onClick={()=>onNavigate("carteira")} style={{ background:"transparent", border:"none", color:C.goldDim, fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>ver carteira →</button>
+            </div>
+            {accounts.map(a=>(
+              <div key={a.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ width:7, height:7, borderRadius:"50%", background:a.color, flexShrink:0 }} />
+                  <div>
+                    <div style={{ fontSize:12, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{a.name}</div>
+                    <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{ownerLabel[a.owner]||a.owner}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:a.balance>=0?C.text:C.red }}>{brl(a.balance)}</div>
+              </div>
+            ))}
+            {/* Dinheiro linha */}
+            <div style={{ borderTop:`1px solid ${C.border}`, marginTop:8, paddingTop:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ width:7, height:7, borderRadius:"50%", background:C.green, flexShrink:0 }} />
+                <div style={{ fontSize:12, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>💵 Dinheiro</div>
+              </div>
+              <div style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:cashBal>=0?C.green:C.red }}>{brl(cashBal)}</div>
+            </div>
+          </div>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:22 }}>
+            <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:14 }}>Gastos por pessoa</div>
+            {[["rodrigo",C.purple],["claudia",C.pink],["casal",C.green]].map(([o,col])=>(
+              <div key={o} style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{ownerLabel[o]}</span>
+                <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:col }}>{brl(byOwner[o]||0)}</span>
               </div>
             ))}
           </div>
@@ -348,113 +890,116 @@ const Dashboard = ({ transactions, accounts }) => {
       </div>
 
       {/* Últimas movimentações */}
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
-        <div style={{ fontSize: 12, color: C.muted, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", marginBottom: 18 }}>Últimas movimentações</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-          {recent.map((t, i) => {
-            const cat = cat_of(t.category);
-            const acc = accounts.find(a => a.id === t.accountId);
-            return (
-              <div key={t.id}>
-                {i > 0 && <Divider />}
-                <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 0" }}>
-                  <div style={{ fontSize: 20, width: 36, textAlign: "center" }}>{cat.icon}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans', sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.description}</div>
-                    <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans', sans-serif" }}>{fmt_date(t.date)} · {acc?.name}</div>
-                  </div>
-                  <Chip icon={cat.icon} label={cat.label} color={cat.color} />
-                  <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, color: t.amount > 0 ? C.green : C.text, minWidth: 100, textAlign: "right" }}>
-                    {t.amount > 0 ? "+" : ""}{fmt_brl(t.amount)}
-                  </div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>Últimas movimentações</div>
+          <button onClick={()=>onNavigate("extrato")} style={{ background:"transparent", border:"none", color:C.goldDim, fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>ver todas →</button>
+        </div>
+        {recent.map((t,i)=>{
+          const cat=catOf(t.category); const acc=accounts.find(a=>a.id===t.accountId);
+          return (
+            <div key={t.id}>
+              {i>0&&<Divider/>}
+              <div style={{ display:"flex", alignItems:"center", gap:14, padding:"11px 0" }}>
+                <div style={{ fontSize:20, width:34, textAlign:"center" }}>{cat.icon}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.description}</div>
+                  <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{fdate(t.date)} · {acc?.name}</div>
+                </div>
+                <Chip icon={cat.icon} label={cat.label} color={cat.color} />
+                <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text, minWidth:100, textAlign:"right" }}>
+                  {t.amount>0?"+":""}{brl(t.amount)}
                 </div>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 };
 
-// EXTRATO (Transactions)
+
+// ─── EXTRATO ──────────────────────────────────────────────────────────────────
 const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
-  const [filter, setFilter] = useState({ search: "", category: "", account: "", month: fmt(TODAY).slice(0, 7) });
-  const set = (k, v) => setFilter(f => ({ ...f, [k]: v }));
+  const [filter, setFilter] = useState({ search:"", category:"", account:"", month:fmt(TODAY).slice(0,7), owner:"" });
+  const sf = (k,v) => setFilter(f=>({...f,[k]:v}));
 
-  const filtered = transactions.filter(t => {
-    if (filter.month && !t.date.startsWith(filter.month)) return false;
-    if (filter.category && t.category !== filter.category) return false;
-    if (filter.account && t.accountId !== filter.account) return false;
-    if (filter.search && !t.description.toLowerCase().includes(filter.search.toLowerCase())) return false;
+  const filtered = transactions.filter(t=>{
+    if (filter.month    && !t.date.startsWith(filter.month)) return false;
+    if (filter.category && t.category !== filter.category)  return false;
+    if (filter.account  && t.accountId !== filter.account)  return false;
+    if (filter.owner) { const acc = accounts.find(a=>a.id===t.accountId); if (!acc || acc.owner!==filter.owner) return false; }
+    if (filter.search   && !t.description.toLowerCase().includes(filter.search.toLowerCase())) return false;
     return true;
-  }).sort((a, b) => b.date.localeCompare(a.date));
+  }).sort((a,b)=>b.date.localeCompare(a.date));
 
-  const inputStyle = {
-    background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
-    color: C.text, padding: "8px 12px", fontSize: 12, fontFamily: "'DM Sans', sans-serif",
-    outline: "none"
-  };
+  const totRec = filtered.filter(t=>t.amount>0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
+  const totDes = filtered.filter(t=>t.amount<0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
       {/* Filtros */}
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <input style={{ ...inputStyle, flex: "1 1 160px" }} placeholder="🔍 Buscar..." value={filter.search} onChange={e => set("search", e.target.value)} />
-        <input type="month" style={inputStyle} value={filter.month} onChange={e => set("month", e.target.value)} />
-        <select style={inputStyle} value={filter.category} onChange={e => set("category", e.target.value)}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:18, display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+        <input style={{ ...IS, flex:"1 1 150px" }} placeholder="🔍 Buscar..." value={filter.search} onChange={e=>sf("search",e.target.value)} />
+        <input type="month" style={{ ...IS, width:150 }} value={filter.month} onChange={e=>sf("month",e.target.value)} />
+        <select style={{ ...IS, width:"auto" }} value={filter.category} onChange={e=>sf("category",e.target.value)}>
           <option value="">Todas categorias</option>
-          {DEFAULT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+          {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
         </select>
-        <select style={inputStyle} value={filter.account} onChange={e => set("account", e.target.value)}>
-          <option value="">Todas contas</option>
-          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        <select style={{ ...IS, width:"auto" }} value={filter.owner} onChange={e=>sf("owner",e.target.value)}>
+          <option value="">Todos</option>
+          <option value="rodrigo">👨 Rodrigo</option>
+          <option value="claudia">👩 Cláudia</option>
+          <option value="casal">💑 Casal</option>
         </select>
-        <button onClick={onAdd} style={{
-          marginLeft: "auto", background: C.gold, color: C.bg, border: "none", borderRadius: 8,
-          padding: "9px 18px", fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-        }}>+ Lançamento</button>
+        <button onClick={onAdd} style={{ marginLeft:"auto", background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"9px 18px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+          + Lançamento
+        </button>
+      </div>
+
+      {/* Totais */}
+      <div style={{ display:"flex", gap:12 }}>
+        <div style={{ background:C.green+"15", border:`1px solid ${C.green}30`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.green, fontFamily:"'DM Sans',sans-serif" }}>
+          Entradas: <strong>{brl(totRec)}</strong>
+        </div>
+        <div style={{ background:C.red+"15", border:`1px solid ${C.red}30`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.red, fontFamily:"'DM Sans',sans-serif" }}>
+          Saídas: <strong>{brl(Math.abs(totDes))}</strong>
+        </div>
+        <div style={{ background:C.border, borderRadius:10, padding:"10px 20px", fontSize:13, color: (totRec+totDes)>=0?C.green:C.red, fontFamily:"'DM Sans',sans-serif" }}>
+          Saldo: <strong>{brl(totRec+totDes)}</strong>
+        </div>
       </div>
 
       {/* Tabela */}
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 130px 120px 100px 80px", gap: 0 }}>
-          {/* Header */}
-          {["Data","Descrição","Conta","Categoria","Valor",""].map((h, i) => (
-            <div key={i} style={{ padding: "12px 16px", fontSize: 11, color: C.muted, fontFamily: "'DM Sans', sans-serif", letterSpacing: 1, textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, background: C.surface }}>
-              {h}
-            </div>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"75px 1fr 130px 120px 105px 70px" }}>
+          {["Data","Descrição","Conta","Categoria","Valor",""].map((h,i)=>(
+            <div key={i} style={{ padding:"11px 14px", fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", letterSpacing:1, textTransform:"uppercase", borderBottom:`1px solid ${C.border}`, background:C.surface }}>{h}</div>
           ))}
-          {/* Rows */}
-          {filtered.length === 0 && (
-            <div style={{ gridColumn: "1/-1", padding: "40px 20px", textAlign: "center", color: C.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 13 }}>
-              Nenhuma movimentação encontrada
-            </div>
+          {filtered.length===0 && (
+            <div style={{ gridColumn:"1/-1", padding:"40px", textAlign:"center", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>Nenhuma movimentação encontrada</div>
           )}
-          {filtered.map((t, i) => {
-            const cat = cat_of(t.category);
-            const acc = accounts.find(a => a.id === t.accountId);
-            return (
-              <>
-                {i > 0 && <div key={`d${t.id}`} style={{ gridColumn: "1/-1", height: 1, background: C.border }} />}
-                <div key={`dt${t.id}`} style={{ padding: "12px 16px", fontSize: 12, color: C.muted, fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center" }}>{fmt_date(t.date)}</div>
-                <div key={`ds${t.id}`} style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
-                  {t.internalTransfer && <span title="Transferência interna" style={{ fontSize: 10, background: C.blue + "22", color: C.blue, border: `1px solid ${C.blue}44`, borderRadius: 4, padding: "1px 5px" }}>INT</span>}
-                  <span style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans', sans-serif" }}>{t.description}</span>
-                </div>
-                <div key={`da${t.id}`} style={{ padding: "12px 16px", fontSize: 12, color: C.soft, fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center" }}>{acc?.name || "—"}</div>
-                <div key={`dc${t.id}`} style={{ padding: "12px 16px", display: "flex", alignItems: "center" }}>
-                  <Chip icon={cat.icon} label={cat.label} color={cat.color} />
-                </div>
-                <div key={`dv${t.id}`} style={{ padding: "12px 16px", display: "flex", alignItems: "center", fontSize: 14, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, color: t.amount > 0 ? C.green : C.text }}>
-                  {t.amount > 0 ? "+" : ""}{fmt_brl(t.amount)}
-                </div>
-                <div key={`do${t.id}`} style={{ padding: "12px 8px", display: "flex", alignItems: "center", gap: 4 }}>
-                  <button onClick={() => onEdit(t)} style={{ background: "transparent", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "4px 6px", borderRadius: 6 }} title="Editar">✏️</button>
-                  <button onClick={() => onDelete(t.id)} style={{ background: "transparent", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, padding: "4px 6px", borderRadius: 6 }} title="Excluir">🗑️</button>
-                </div>
-              </>
-            );
+          {filtered.map((t,i)=>{
+            const cat = catOf(t.category);
+            const acc = accounts.find(a=>a.id===t.accountId);
+            return [
+              i>0 && <div key={`d${t.id}`} style={{ gridColumn:"1/-1", height:1, background:C.border }} />,
+              <div key={`a${t.id}`} style={{ padding:"11px 14px", fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", alignItems:"center" }}>{fdate(t.date)}</div>,
+              <div key={`b${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:7 }}>
+                {t.internalTransfer && <span style={{ fontSize:10, background:C.blue+"22", color:C.blue, border:`1px solid ${C.blue}44`, borderRadius:4, padding:"1px 5px" }}>INT</span>}
+                <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:220 }}>{t.description}</span>
+              </div>,
+              <div key={`c${t.id}`} style={{ padding:"11px 14px", fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", display:"flex", alignItems:"center" }}>{acc?.name||"—"}</div>,
+              <div key={`e${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center" }}><Chip icon={cat.icon} label={cat.label} color={cat.color} /></div>,
+              <div key={`f${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center", fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text }}>
+                {t.amount>0?"+":""}{brl(t.amount)}
+              </div>,
+              <div key={`g${t.id}`} style={{ padding:"11px 6px", display:"flex", alignItems:"center", gap:2 }}>
+                <button onClick={()=>onEdit(t)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px", borderRadius:5 }} title="Editar">✏️</button>
+                <button onClick={()=>onDelete(t.id)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px", borderRadius:5 }} title="Excluir">🗑️</button>
+              </div>
+            ];
           })}
         </div>
       </div>
@@ -462,25 +1007,23 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
   );
 };
 
-// UPLOAD EXTRATO (IA)
-const UploadExtrato = ({ accounts, onImport }) => {
-  const [step, setStep] = useState("idle"); // idle | parsing | review | done
-  const [rows, setRows] = useState([]);
-  const [classifying, setClassifying] = useState(false);
-  const [selAccount, setSelAccount] = useState(accounts[0]?.id || "");
+// ─── IMPORTAR EXTRATO ─────────────────────────────────────────────────────────
+const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
+  const [step, setStep]       = useState("idle");
+  const [rows, setRows]       = useState([]);
+  const [classifying, setCls] = useState(false);
+  const [selAcc, setSelAcc]   = useState(accounts[0]?.id||"");
+  const [dupWarnings, setDups] = useState([]);
 
   const parseCSV = (text) => {
-    const lines = text.trim().split("\n").filter(l => l.trim());
-    const parsed = [];
-    for (const line of lines.slice(1)) {
-      const cols = line.split(/[;,]/).map(c => c.replace(/"/g, "").trim());
-      if (cols.length < 3) continue;
-      const date = cols[0]; const desc = cols[1]; const raw = cols[2];
-      const amount = parseFloat(raw.replace(/\./g, "").replace(",", "."));
-      if (isNaN(amount)) continue;
-      parsed.push({ id: "imp_" + Math.random().toString(36).slice(2), date, description: desc, amount, accountId: selAccount, category: "outros", keep: true });
-    }
-    return parsed;
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    return lines.slice(1).map(line=>{
+      const cols = line.split(/[;,]/).map(c=>c.replace(/"/g,"").trim());
+      if (cols.length < 3) return null;
+      const amount = parseFloat(cols[2].replace(/\./g,"").replace(",","."));
+      if (isNaN(amount)) return null;
+      return { id:"imp_"+Math.random().toString(36).slice(2), date:cols[0], description:cols[1], amount, accountId:selAcc, category:"outros", keep:true, internalTransfer:false };
+    }).filter(Boolean);
   };
 
   const handleFile = async (e) => {
@@ -489,99 +1032,119 @@ const UploadExtrato = ({ accounts, onImport }) => {
     setStep("parsing");
     const text = await file.text();
     let parsed = [];
-    if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) parsed = parseCSV(text);
-    else { alert("Por enquanto suportamos CSV. OFX e PDF em breve!"); setStep("idle"); return; }
-    if (!parsed.length) { alert("Não foi possível interpretar o arquivo. Verifique o formato."); setStep("idle"); return; }
-    setRows(parsed);
+    if (file.name.match(/\.(csv|txt)$/i)) parsed = parseCSV(text);
+    else { alert("Formato não suportado. Use CSV por enquanto."); setStep("idle"); return; }
+    if (!parsed.length) { alert("Não foi possível interpretar o arquivo."); setStep("idle"); return; }
+
+    // detect internal transfers
+    const withInternal = parsed.map(r => ({
+      ...r,
+      internalTransfer: detectInternalTransfer(r.description, accounts),
+      category: detectInternalTransfer(r.description, accounts) ? "transferencia" : "outros"
+    }));
+
+    // detect duplicates against existing txs
+    const dups = withInternal.filter(r =>
+      allTxs.some(t => t.accountId===r.accountId && t.date===r.date && Math.abs(t.amount)===Math.abs(r.amount) && t.description.toLowerCase()===r.description.toLowerCase())
+    );
+    setDups(dups.map(d=>d.id));
+
+    // auto-uncheck internal transfers that have a pair already
+    const deduped = withInternal.map(r => ({
+      ...r,
+      keep: !dups.find(d=>d.id===r.id)
+    }));
+
+    setRows(deduped);
     setStep("review");
-    // Classify with AI
-    setClassifying(true);
-    const updated = await Promise.all(parsed.map(async r => ({ ...r, category: await classifyWithAI(r.description) })));
+
+    // Classify non-internal with AI
+    setCls(true);
+    const updated = await Promise.all(deduped.map(async r => {
+      if (r.internalTransfer) return r;
+      return { ...r, category: await classifyTx(r.description) };
+    }));
     setRows(updated);
-    setClassifying(false);
+    setCls(false);
   };
 
-  const toggle = (id) => setRows(rs => rs.map(r => r.id === id ? { ...r, keep: !r.keep } : r));
-  const setcat = (id, cat) => setRows(rs => rs.map(r => r.id === id ? { ...r, category: cat } : r));
+  const toggle  = (id) => setRows(rs=>rs.map(r=>r.id===id?{...r,keep:!r.keep}:r));
+  const setCat  = (id,cat) => setRows(rs=>rs.map(r=>r.id===id?{...r,category:cat}:r));
 
   const confirmImport = () => {
-    const toImport = rows.filter(r => r.keep);
-    onImport(toImport);
+    onImport(rows.filter(r=>r.keep));
     setStep("done");
   };
 
-  const inputStyle = {
-    background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8,
-    color: C.text, padding: "8px 12px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", outline: "none"
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 28 }}>
-        <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond', serif", color: C.text, marginBottom: 6 }}>Importar Extrato</div>
-        <div style={{ fontSize: 13, color: C.muted, fontFamily: "'DM Sans', sans-serif", marginBottom: 24 }}>
-          Faça upload do extrato bancário. A IA classifica automaticamente cada movimentação.
-          <br /><span style={{ color: C.goldDim }}>Formatos suportados: CSV (em breve: OFX, PDF, Excel)</span>
+    <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:28 }}>
+        <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:6 }}>Importar Extrato Bancário</div>
+        <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>
+          Upload do arquivo de extrato. A IA classifica automaticamente cada linha.
+        </div>
+        <div style={{ fontSize:12, color:C.goldDim, fontFamily:"'DM Sans',sans-serif", marginBottom:22 }}>
+          ✓ Transferências internas detectadas automaticamente · ✓ Duplicatas marcadas · Formatos: CSV (OFX/PDF em breve)
         </div>
 
-        {step === "idle" && (
-          <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+        {step==="idle" && (
+          <div style={{ display:"flex", gap:14, alignItems:"flex-end", flexWrap:"wrap" }}>
             <div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans', sans-serif" }}>CONTA DESTINO</div>
-              <select style={inputStyle} value={selAccount} onChange={e => setSelAccount(e.target.value)}>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CONTA DESTINO</div>
+              <select style={{ ...IS, width:"auto" }} value={selAcc} onChange={e=>setSelAcc(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
-            <label style={{
-              display: "inline-flex", alignItems: "center", gap: 8, background: C.gold, color: C.bg,
-              border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600,
-              fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-            }}>
+            <label style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.gold, color:C.bg, borderRadius:8, padding:"10px 22px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
               📁 Selecionar arquivo
-              <input type="file" accept=".csv,.txt,.ofx" style={{ display: "none" }} onChange={handleFile} />
+              <input type="file" accept=".csv,.txt,.ofx" style={{ display:"none" }} onChange={handleFile} />
             </label>
           </div>
         )}
 
-        {step === "parsing" && (
-          <div style={{ color: C.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 14 }}>⏳ Processando arquivo...</div>
-        )}
+        {step==="parsing" && <div style={{ color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>⏳ Processando...</div>}
 
-        {step === "done" && (
-          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-            <div style={{ color: C.green, fontFamily: "'DM Sans', sans-serif", fontSize: 14 }}>✅ Importação concluída!</div>
-            <button onClick={() => setStep("idle")} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.muted, borderRadius: 8, padding: "8px 16px", fontSize: 12, fontFamily: "'DM Sans', sans-serif", cursor: "pointer" }}>Nova importação</button>
+        {step==="done" && (
+          <div style={{ display:"flex", gap:14, alignItems:"center" }}>
+            <div style={{ color:C.green, fontFamily:"'DM Sans',sans-serif" }}>✅ Importação concluída!</div>
+            <button onClick={()=>setStep("idle")} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"8px 16px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Nova importação</button>
           </div>
         )}
       </div>
 
-      {step === "review" && (
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ padding: "16px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <span style={{ fontSize: 15, color: C.text, fontFamily: "'Cormorant Garamond', serif" }}>{rows.length} movimentações encontradas</span>
-              {classifying && <span style={{ fontSize: 12, color: C.gold, fontFamily: "'DM Sans', sans-serif", marginLeft: 12 }}>🤖 IA classificando...</span>}
+      {step==="review" && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
+          <div style={{ padding:"16px 24px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+              <span style={{ fontSize:15, color:C.text, fontFamily:"'Cormorant Garamond',serif" }}>{rows.length} movimentações</span>
+              {dupWarnings.length>0 && <span style={{ fontSize:12, color:C.gold, fontFamily:"'DM Sans',sans-serif" }}>⚠️ {dupWarnings.length} possível(is) duplicata(s) desmarcada(s)</span>}
+              {classifying && <span style={{ fontSize:12, color:C.blue, fontFamily:"'DM Sans',sans-serif" }}>🤖 IA classificando...</span>}
             </div>
             <button onClick={confirmImport} disabled={classifying} style={{
-              background: classifying ? C.border : C.gold, color: C.bg, border: "none", borderRadius: 8,
-              padding: "9px 20px", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: classifying ? "not-allowed" : "pointer"
-            }}>Confirmar importação ({rows.filter(r => r.keep).length})</button>
+              background: classifying?C.border:C.gold, color:C.bg, border:"none", borderRadius:8,
+              padding:"9px 22px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor: classifying?"not-allowed":"pointer"
+            }}>Importar {rows.filter(r=>r.keep).length} lançamentos</button>
           </div>
-          <div style={{ maxHeight: 480, overflowY: "auto" }}>
-            {rows.map((r, i) => {
-              const cat = cat_of(r.category);
+          <div style={{ maxHeight:460, overflowY:"auto" }}>
+            {rows.map((r,i)=>{
+              const cat = catOf(r.category);
+              const isDup = dupWarnings.includes(r.id);
               return (
                 <div key={r.id}>
-                  {i > 0 && <Divider />}
-                  <div style={{ display: "grid", gridTemplateColumns: "40px 80px 1fr 160px 100px", gap: 0, alignItems: "center", padding: "10px 16px", opacity: r.keep ? 1 : .35 }}>
-                    <input type="checkbox" checked={r.keep} onChange={() => toggle(r.id)} style={{ accentColor: C.gold, width: 16, height: 16 }} />
-                    <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans', sans-serif" }}>{fmt_date(r.date)}</div>
-                    <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans', sans-serif" }}>{r.description}</div>
-                    <select value={r.category} onChange={e => setcat(r.id, e.target.value)} style={{ ...inputStyle, fontSize: 11, padding: "4px 8px" }}>
-                      {DEFAULT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                  {i>0&&<Divider/>}
+                  <div style={{ display:"grid", gridTemplateColumns:"40px 75px 1fr 140px 105px", alignItems:"center", padding:"10px 16px", opacity:r.keep?1:.4, background: isDup?"#e0a02008":"transparent" }}>
+                    <input type="checkbox" checked={r.keep} onChange={()=>toggle(r.id)} style={{ accentColor:C.gold, width:16, height:16 }} />
+                    <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{fdate(r.date)}</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      {r.internalTransfer && <span style={{ fontSize:10, background:C.blue+"22", color:C.blue, border:`1px solid ${C.blue}44`, borderRadius:4, padding:"1px 5px" }}>INT</span>}
+                      {isDup && <span style={{ fontSize:10, background:C.gold+"22", color:C.gold, border:`1px solid ${C.gold}44`, borderRadius:4, padding:"1px 5px" }}>DUP?</span>}
+                      <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{r.description}</span>
+                    </div>
+                    <select value={r.category} onChange={e=>setCat(r.id,e.target.value)} style={{ ...IS, fontSize:11, padding:"4px 8px", width:"auto" }}>
+                      {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                     </select>
-                    <div style={{ fontSize: 14, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, color: r.amount > 0 ? C.green : C.text, textAlign: "right" }}>
-                      {r.amount > 0 ? "+" : ""}{fmt_brl(r.amount)}
+                    <div style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:r.amount>0?C.green:C.text, textAlign:"right" }}>
+                      {r.amount>0?"+":""}{brl(r.amount)}
                     </div>
                   </div>
                 </div>
@@ -594,152 +1157,850 @@ const UploadExtrato = ({ accounts, onImport }) => {
   );
 };
 
-// CONTAS
-const Contas = ({ accounts, onAdd, onEdit }) => {
-  const ownerLabel = { rodrigo: "👨 Rodrigo", esposa: "👩 Esposa", casal: "💑 Casal" };
-  const typeLabel  = { corrente: "Conta Corrente", poupanca: "Poupança", cartao: "Cartão de Crédito", investimento: "Investimento" };
+// ─── COMPROVANTES (OCR) ───────────────────────────────────────────────────────
+const Comprovantes = ({ accounts, onAddTx }) => {
+  const [step, setStep]     = useState("idle"); // idle | processing | review | done
+  const [preview, setPreview] = useState(null);
+  const [result, setResult]   = useState(null);
+  const [form, setForm]       = useState(null);
+  const [selAcc, setSelAcc]   = useState(accounts[0]?.id||"");
+  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStep("processing"); setResult(null);
+
+    // preview
+    const reader = new FileReader();
+    reader.onload = ev => setPreview(ev.target.result);
+    reader.readAsDataURL(file);
+
+    // base64 for API
+    const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
+    const mime = file.type || "image/jpeg";
+
+    const parsed = await ocrComprovante(b64, mime);
+    if (!parsed) { alert("Não foi possível extrair dados do comprovante. Tente outra imagem."); setStep("idle"); return; }
+
+    const tx = {
+      id: "tx_"+Date.now(),
+      accountId: selAcc,
+      date: parsed.data || fmt(TODAY),
+      description: parsed.estabelecimento || parsed.descricao || "Comprovante",
+      amount: -(Math.abs(parsed.valor||0)),
+      category: parsed.categoria || "outros",
+      notes: parsed.descricao || "",
+      internalTransfer: false,
+      type: "despesa"
+    };
+    setForm(tx);
+    setResult(parsed);
+    setStep("review");
+  };
+
+  const confirm = () => {
+    onAddTx({ ...form, amount: form.type==="receita" ? Math.abs(form.amount) : -Math.abs(form.amount) });
+    setStep("done");
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={onAdd} style={{
-          background: C.gold, color: C.bg, border: "none", borderRadius: 8,
-          padding: "10px 20px", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", cursor: "pointer"
-        }}>+ Nova conta</button>
+    <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:28 }}>
+        <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:6 }}>Comprovantes & Notas Fiscais</div>
+        <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>
+          Foto ou PDF de cupom fiscal, nota, recibo ou comprovante de cartão.
+        </div>
+        <div style={{ fontSize:12, color:C.goldDim, fontFamily:"'DM Sans',sans-serif", marginBottom:22 }}>
+          🤖 A IA extrai data, valor, estabelecimento e categoria automaticamente
+        </div>
+
+        {(step==="idle"||step==="done") && (
+          <div style={{ display:"flex", gap:14, alignItems:"flex-end", flexWrap:"wrap" }}>
+            {step==="done" && <div style={{ color:C.green, fontFamily:"'DM Sans',sans-serif", fontSize:14, marginRight:10 }}>✅ Lançamento criado!</div>}
+            <div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CONTA</div>
+              <select style={{ ...IS, width:"auto" }} value={selAcc} onChange={e=>setSelAcc(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <label style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.gold, color:C.bg, borderRadius:8, padding:"10px 22px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+              📷 Enviar comprovante
+              <input type="file" accept="image/*,.pdf" style={{ display:"none" }} onChange={handleFile} />
+            </label>
+          </div>
+        )}
+
+        {step==="processing" && (
+          <div style={{ display:"flex", alignItems:"center", gap:12, color:C.blue, fontFamily:"'DM Sans',sans-serif" }}>
+            <div style={{ width:18, height:18, borderRadius:"50%", border:`2px solid ${C.blue}`, borderTopColor:"transparent", animation:"spin 1s linear infinite" }} />
+            IA analisando o comprovante...
+          </div>
+        )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-        {accounts.map(a => (
-          <div key={a.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, width: 4, height: "100%", background: a.color, borderRadius: "16px 0 0 16px" }} />
-            <div style={{ paddingLeft: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 16, color: C.text, fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>{a.name}</div>
-                  <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans', sans-serif", marginTop: 2 }}>{typeLabel[a.type] || a.type}</div>
-                </div>
-                <Badge color={a.color}>{ownerLabel[a.owner] || a.owner}</Badge>
+
+      {step==="review" && form && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:18 }}>
+          {/* Preview */}
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:20, display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>Comprovante</div>
+            {preview && <img src={preview} alt="comprovante" style={{ maxHeight:380, objectFit:"contain", borderRadius:10, border:`1px solid ${C.border}` }} />}
+            {result && (
+              <div style={{ background:C.bg, borderRadius:10, padding:14, display:"flex", flexDirection:"column", gap:6 }}>
+                <div style={{ fontSize:11, color:C.goldDim, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Dados extraídos pela IA</div>
+                {[["Estabelecimento", result.estabelecimento],["Data",result.data],["Valor",result.valor?brl(result.valor):null],["Categoria",result.categoria],["Descrição",result.descricao]].map(([k,v])=>v&&(
+                  <div key={k} style={{ display:"flex", gap:8, fontSize:12, fontFamily:"'DM Sans',sans-serif" }}>
+                    <span style={{ color:C.muted, minWidth:110 }}>{k}:</span>
+                    <span style={{ color:C.soft }}>{String(v)}</span>
+                  </div>
+                ))}
               </div>
-              <div style={{ fontSize: 28, fontFamily: "'Cormorant Garamond', serif", fontWeight: 600, color: a.balance >= 0 ? C.text : C.red }}>
-                {fmt_brl(a.balance)}
+            )}
+          </div>
+
+          {/* Formulário de revisão */}
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24 }}>
+            <div style={{ fontSize:16, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:20 }}>Revisar e confirmar</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div style={{ display:"flex", gap:8 }}>
+                {[["despesa","💸 Despesa",C.red],["receita","💰 Receita",C.green]].map(([t,l,col])=>(
+                  <button key={t} onClick={()=>sf("type",t)} style={{ flex:1, padding:"8px", borderRadius:8, fontSize:12, fontWeight:500, fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+                    background:form.type===t?col+"22":"transparent", border:`1px solid ${form.type===t?col:C.border}`, color:form.type===t?col:C.muted }}>{l}</button>
+                ))}
+              </div>
+              {[
+                ["DESCRIÇÃO","description","text","Estabelecimento"],
+                ["DATA","date","date",""],
+              ].map(([label,key,type,ph])=>(
+                <div key={key}>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>{label}</div>
+                  <input type={type} style={IS} placeholder={ph} value={form[key]||""} onChange={e=>sf(key,e.target.value)} />
+                </div>
+              ))}
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VALOR (R$)</div>
+                <input style={IS} placeholder="0,00" value={Math.abs(form.amount)||""} onChange={e=>sf("amount",e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CONTA</div>
+                <select style={IS} value={form.accountId} onChange={e=>sf("accountId",e.target.value)}>
+                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CATEGORIA</div>
+                <select style={IS} value={form.category} onChange={e=>sf("category",e.target.value)}>
+                  {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>NOTAS</div>
+                <input style={IS} placeholder="Observações..." value={form.notes||""} onChange={e=>sf("notes",e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+              <button onClick={confirm} style={{ flex:1, background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"12px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                ✓ Confirmar lançamento
+              </button>
+              <button onClick={()=>setStep("idle")} style={{ background:"transparent", color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 16px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+};
+
+// ─── METAS ────────────────────────────────────────────────────────────────────
+const Metas = ({ transactions }) => {
+  const [goals, setGoals] = useState(() => loadGoals());
+  const [editing, setEditing] = useState(null); // catId being edited
+  const [draft, setDraft]     = useState("");
+
+  const month  = fmt(TODAY).slice(0,7);
+  const thisM  = transactions.filter(t=>t.date.startsWith(month)&&t.amount<0&&!t.internalTransfer);
+  const byCat  = {};
+  thisM.forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
+
+  const spendable = DEFAULT_CATEGORIES.filter(c=>!["receita","transferencia"].includes(c.id));
+
+  const saveGoal = (id) => {
+    const val = parseFloat(draft.replace(",","."));
+    const next = { ...goals };
+    if (!isNaN(val) && val > 0) next[id] = val; else delete next[id];
+    setGoals(next); saveGoals(next); setEditing(null); setDraft("");
+  };
+
+  const removeGoal = (id) => {
+    const next = { ...goals }; delete next[id];
+    setGoals(next); saveGoals(next);
+  };
+
+  const totalGoals = Object.values(goals).reduce((s,v)=>s+v,0);
+  const totalSpent = Object.entries(byCat).filter(([id])=>goals[id]).reduce((s,[,v])=>s+v,0);
+  const overCount  = Object.entries(goals).filter(([id,lim])=>(byCat[id]||0)>lim).length;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      {/* Resumo */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
+        <StatCard label="Orçamento total/mês" value={brl(totalGoals)}  icon="🎯" color={C.goldLight} sub={`${Object.keys(goals).length} categorias`} />
+        <StatCard label="Gasto c/ meta"       value={brl(totalSpent)}  icon="📊" color={totalSpent>totalGoals?C.red:C.green} sub="nas categorias com limite" />
+        <StatCard label="Categorias no limite" value={`${overCount}`}  icon="🚨" color={overCount>0?C.red:C.green} sub={overCount>0?"atenção necessária":"tudo ok"} />
+      </div>
+
+      {/* Aviso geral */}
+      {overCount>0 && (
+        <div style={{ background:C.red+"15", border:`1px solid ${C.red}40`, borderRadius:12, padding:"14px 20px", fontSize:13, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>
+          🚨 <strong style={{color:C.red}}>{overCount} categoria{overCount>1?"s":""}</strong> ultrapassou{overCount>1?"m":""} a meta este mês.
+        </div>
+      )}
+
+      {/* Grade de categorias */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
+        {/* Header */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 110px 180px 80px", padding:"10px 20px", background:C.surface, borderBottom:`1px solid ${C.border}` }}>
+          {["Categoria","Gasto","Meta","Progresso",""].map((h,i)=>(
+            <div key={i} style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", textTransform:"uppercase", letterSpacing:1 }}>{h}</div>
+          ))}
+        </div>
+
+        {spendable.map((cat, i) => {
+          const spent = byCat[cat.id] || 0;
+          const goal  = goals[cat.id];
+          const pct   = goal ? Math.min(spent/goal*100, 100) : 0;
+          const over  = goal && spent > goal;
+          const warn  = goal && spent/goal > 0.8 && !over;
+          const barColor = over ? C.red : warn ? C.gold : C.green;
+          const isEditing = editing === cat.id;
+
+          return (
+            <div key={cat.id}>
+              {i>0 && <div style={{ height:1, background:C.border }} />}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 110px 110px 180px 80px", padding:"13px 20px", alignItems:"center" }}>
+                {/* Cat name */}
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:18 }}>{cat.icon}</span>
+                  <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{cat.label}</span>
+                  {over  && <span style={{ fontSize:10, background:C.red+"22", color:C.red,  border:`1px solid ${C.red}44`,  borderRadius:4, padding:"1px 6px" }}>ACIMA</span>}
+                  {warn  && <span style={{ fontSize:10, background:C.gold+"22",color:C.gold, border:`1px solid ${C.gold}44`, borderRadius:4, padding:"1px 6px" }}>ATENÇÃO</span>}
+                </div>
+                {/* Gasto */}
+                <div style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color: over?C.red:spent>0?C.text:C.muted }}>
+                  {spent>0 ? brl(spent) : "—"}
+                </div>
+                {/* Meta */}
+                <div>
+                  {isEditing ? (
+                    <div style={{ display:"flex", gap:5, alignItems:"center" }}>
+                      <input autoFocus style={{ ...IS, width:72, padding:"5px 8px", fontSize:12 }}
+                        placeholder="0,00" value={draft} onChange={e=>setDraft(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==="Enter") saveGoal(cat.id); if(e.key==="Escape"){setEditing(null);setDraft("");} }} />
+                      <button onClick={()=>saveGoal(cat.id)} style={{ background:C.gold, border:"none", color:C.bg, borderRadius:6, padding:"5px 8px", fontSize:11, cursor:"pointer" }}>✓</button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", color:goal?C.soft:C.muted, cursor:"pointer" }}
+                      onClick={()=>{ setEditing(cat.id); setDraft(goal?String(goal):""); }}>
+                      {goal ? brl(goal) : <span style={{fontSize:12,color:C.border}}>+ definir</span>}
+                    </span>
+                  )}
+                </div>
+                {/* Barra */}
+                <div>
+                  {goal ? (
+                    <div>
+                      <div style={{ height:6, background:C.border, borderRadius:6, marginBottom:3 }}>
+                        <div style={{ height:"100%", width:`${pct}%`, background:barColor, borderRadius:6, transition:"width .4s" }} />
+                      </div>
+                      <div style={{ fontSize:10, color: over?C.red:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                        {pct.toFixed(0)}% {over?`(+${brl(spent-goal)})`:goal?`(faltam ${brl(goal-spent)})`:""}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:11, color:C.border, fontFamily:"'DM Sans',sans-serif" }}>sem meta definida</div>
+                  )}
+                </div>
+                {/* Ações */}
+                <div style={{ display:"flex", gap:4 }}>
+                  <button onClick={()=>{ setEditing(cat.id); setDraft(goal?String(goal):""); }}
+                    style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:13, padding:"3px 5px" }} title="Editar">✏️</button>
+                  {goal && <button onClick={()=>removeGoal(cat.id)}
+                    style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:13, padding:"3px 5px" }} title="Remover">🗑️</button>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 20px", fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+        💡 Clique em <strong style={{color:C.soft}}>+ definir</strong> ou no ✏️ para definir uma meta mensal por categoria. As metas ficam salvas localmente e aparecem como alerta no Dashboard quando ultrapassadas.
+      </div>
+    </div>
+  );
+};
+
+// ─── CONTAS (com CRUD) ────────────────────────────────────────────────────────
+const ACCOUNTS_KEY = "fontanezzi_accounts";
+
+const ACCOUNT_COLORS = ["#9b59b6","#c9a84c","#e05c9b","#4caf82","#4c8ec9","#e05c5c","#5cc9e0","#e08c4c","#6b6f7d"];
+
+const ContasView = ({ accounts, setAccounts }) => {
+  const [showForm, setShowForm] = useState(false);
+  const [editAcc, setEditAcc]   = useState(null);
+  const [form, setForm] = useState({ name:"", type:"corrente", owner:"rodrigo", balance:"", color:ACCOUNT_COLORS[0] });
+  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const openNew  = () => { setForm({ name:"", type:"corrente", owner:"rodrigo", balance:"", color:ACCOUNT_COLORS[0] }); setEditAcc(null); setShowForm(true); };
+  const openEdit = (a) => { setForm({ ...a, balance:String(a.balance) }); setEditAcc(a); setShowForm(true); };
+
+  const handleSave = () => {
+    if (!form.name.trim()) return;
+    const bal = parseFloat(form.balance.replace(",",".")) || 0;
+    const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
+    const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
+    setAccounts(next);
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+    setShowForm(false); setEditAcc(null);
+  };
+
+  const handleDelete = (id) => {
+    if (!window.confirm("Excluir esta conta?")) return;
+    const next = accounts.filter(a=>a.id!==id);
+    setAccounts(next);
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      <div style={{ display:"flex", justifyContent:"flex-end" }}>
+        <button onClick={openNew} style={{ background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+          + Nova conta
+        </button>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:16 }}>
+        {accounts.map(a=>(
+          <div key={a.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24, position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:0, left:0, width:4, height:"100%", background:a.color }} />
+            <div style={{ paddingLeft:10 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                <div>
+                  <div style={{ fontSize:16, color:C.text, fontFamily:"'DM Sans',sans-serif", fontWeight:500 }}>{a.name}</div>
+                  <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:2 }}>{typeLabel[a.type]||a.type}</div>
+                </div>
+                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                  <Badge color={a.color}>{ownerLabel[a.owner]||a.owner}</Badge>
+                </div>
+              </div>
+              <div style={{ fontSize:28, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:a.balance>=0?C.text:C.red, marginBottom:14 }}>
+                {brl(a.balance)}
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>openEdit(a)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"5px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>✏️ Editar</button>
+                <button onClick={()=>handleDelete(a.id)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"5px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>🗑️ Excluir</button>
               </div>
             </div>
           </div>
         ))}
       </div>
+
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:20 }}>
+        <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+          💡 <strong style={{color:C.soft}}>Transferências internas</strong> entre contas desta lista são detectadas automaticamente na importação de extrato — evitando duplicidade nos relatórios.
+        </div>
+      </div>
+
+      {/* Form modal */}
+      {showForm && (
+        <div style={{ position:"fixed", inset:0, background:"#000b", display:"flex", alignItems:"center", justifyContent:"center", zIndex:150 }}>
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:36, width:460, maxWidth:"95vw" }}>
+            <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:24 }}>
+              {editAcc ? "Editar conta" : "Nova conta"}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>NOME DA CONTA</div>
+                <input style={IS} placeholder="Ex: Nubank - Rodrigo" value={form.name} onChange={e=>sf("name",e.target.value)} />
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <div>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>TIPO</div>
+                  <select style={IS} value={form.type} onChange={e=>sf("type",e.target.value)}>
+                    <option value="corrente">Conta Corrente</option>
+                    <option value="poupanca">Poupança</option>
+                    <option value="cartao">Cartão de Crédito</option>
+                    <option value="investimento">Investimento</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>TITULAR</div>
+                  <select style={IS} value={form.owner} onChange={e=>sf("owner",e.target.value)}>
+                    <option value="rodrigo">👨 Rodrigo</option>
+                    <option value="claudia">👩 Cláudia</option>
+                    <option value="casal">💑 Casal</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>SALDO ATUAL (R$)</div>
+                <input style={IS} placeholder="0,00" value={form.balance} onChange={e=>sf("balance",e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontFamily:"'DM Sans',sans-serif" }}>COR</div>
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {ACCOUNT_COLORS.map(col=>(
+                    <button key={col} onClick={()=>sf("color",col)} style={{
+                      width:28, height:28, borderRadius:"50%", background:col, border: form.color===col?`3px solid ${C.text}`:`2px solid transparent`,
+                      cursor:"pointer", flexShrink:0
+                    }} />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:24 }}>
+              <button onClick={handleSave} style={{ flex:1, background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"12px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                Salvar
+              </button>
+              <button onClick={()=>{setShowForm(false);setEditAcc(null);}} style={{ background:"transparent", color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 20px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── CARTEIRA ─────────────────────────────────────────────────────────────────
+const CASH_STORAGE_KEY = "fontanezzi_cash_txs";
+
+function loadCashTxs() {
+  try { return JSON.parse(localStorage.getItem(CASH_STORAGE_KEY)) || []; } catch { return []; }
+}
+function saveCashTxs(txs) {
+  localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(txs));
+}
+
+const Carteira = ({ accounts }) => {
+  const [cashTxs, setCashTxs] = useState(() => loadCashTxs());
+  const [showForm, setShowForm] = useState(false);
+  const [editCash, setEditCash] = useState(null);
+  const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "" });
+  const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const cashBalance = cashTxs.reduce((s, t) => s + t.amount, 0);
+  const accountsTotal = accounts.reduce((s, a) => s + a.balance, 0);
+  const grandTotal = accountsTotal + cashBalance;
+
+  const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "" }); setEditCash(null); setShowForm(true); };
+  const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: tx.amount >= 0 ? "entrada" : "saida", amount: Math.abs(tx.amount).toString() }); setShowForm(true); };
+
+  const handleSave = () => {
+    if (!form.description.trim() || !form.amount) return;
+    const amt = parseFloat(form.amount.replace(",", "."));
+    if (isNaN(amt)) return;
+    const tx = { ...form, id: editCash?.id || ("cash_" + Date.now()), amount: form.type === "entrada" ? Math.abs(amt) : -Math.abs(amt) };
+    const next = editCash
+      ? cashTxs.map(t => t.id === tx.id ? tx : t)
+      : [tx, ...cashTxs];
+    setCashTxs(next);
+    saveCashTxs(next);
+    setShowForm(false); setEditCash(null);
+  };
+
+  const handleDelete = (id) => {
+    const next = cashTxs.filter(t => t.id !== id);
+    setCashTxs(next); saveCashTxs(next);
+  };
+
+  // group accounts by owner for display
+  const grouped = {
+    rodrigo: accounts.filter(a => a.owner === "rodrigo"),
+    claudia:  accounts.filter(a => a.owner === "claudia"),
+    casal:    accounts.filter(a => a.owner === "casal"),
+    investimento: accounts.filter(a => a.type === "investimento"),
+  };
+
+  const SectionHeader = ({ label }) => (
+    <div style={{ fontSize: 10, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 10, marginTop: 4 }}>{label}</div>
+  );
+
+  const AccountRow = ({ a }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
+        <div>
+          <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif" }}>{a.name}</div>
+          <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{typeLabel[a.type] || a.type}</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 16, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: a.balance >= 0 ? C.text : C.red }}>
+        {brl(a.balance)}
+      </div>
+    </div>
+  );
+
+  // Subtotals
+  const subOf = (arr) => arr.reduce((s, a) => s + a.balance, 0);
+  const correntes = accounts.filter(a => a.type !== "investimento");
+  const investimentos = accounts.filter(a => a.type === "investimento");
+
+  const recentCash = [...cashTxs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 50);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* ── PATRIMÔNIO TOTAL ─────────────────────────────────────── */}
+      <div style={{
+        background: `linear-gradient(135deg, ${C.card} 0%, #1e2335 100%)`,
+        border: `1px solid ${C.goldDim}55`, borderRadius: 20, padding: "28px 32px",
+        display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20
+      }}>
+        <div>
+          <div style={{ fontSize: 11, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 6 }}>Patrimônio disponível total</div>
+          <div style={{ fontSize: 42, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.goldLight, lineHeight: 1 }}>{brl(grandTotal)}</div>
+          <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginTop: 6 }}>Contas bancárias + dinheiro em espécie</div>
+        </div>
+        <div style={{ display: "flex", gap: 24 }}>
+          {[
+            ["🏦 Contas", brl(accountsTotal), C.blue],
+            ["💵 Dinheiro", brl(cashBalance), cashBalance >= 0 ? C.green : C.red],
+          ].map(([label, val, col]) => (
+            <div key={label} style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 18 }}>
+
+        {/* ── CONTAS BANCÁRIAS ─────────────────────────────────────── */}
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, display: "flex", flexDirection: "column", gap: 0 }}>
+          <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 16 }}>Contas bancárias</div>
+
+          {/* Rodrigo */}
+          {grouped.rodrigo.filter(a=>a.type!=="investimento").length > 0 && <>
+            <SectionHeader label="👨 Rodrigo" />
+            {grouped.rodrigo.filter(a=>a.type!=="investimento").map(a => <AccountRow key={a.id} a={a} />)}
+          </>}
+
+          {/* Cláudia */}
+          {grouped.claudia.filter(a=>a.type!=="investimento").length > 0 && <>
+            <SectionHeader label="👩 Cláudia" />
+            {grouped.claudia.filter(a=>a.type!=="investimento").map(a => <AccountRow key={a.id} a={a} />)}
+          </>}
+
+          {/* Casal */}
+          {grouped.casal.filter(a=>a.type!=="investimento").length > 0 && <>
+            <SectionHeader label="💑 Casal" />
+            {grouped.casal.filter(a=>a.type!=="investimento").map(a => <AccountRow key={a.id} a={a} />)}
+          </>}
+
+          {/* Investimentos */}
+          {investimentos.length > 0 && <>
+            <SectionHeader label="📈 Investimentos" />
+            {investimentos.map(a => <AccountRow key={a.id} a={a} />)}
+          </>}
+
+          {/* Subtotais */}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+            {correntes.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>Subtotal contas correntes</span>
+                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.soft }}>{brl(subOf(correntes))}</span>
+              </div>
+            )}
+            {investimentos.length > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>Subtotal investimentos</span>
+                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.blue }}>{brl(subOf(investimentos))}</span>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif", fontWeight: 500 }}>Total contas</span>
+              <span style={{ fontSize: 18, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.goldLight }}>{brl(accountsTotal)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── DINHEIRO ─────────────────────────────────────────────── */}
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {/* Header dinheiro */}
+          <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>💵 Dinheiro em espécie</div>
+              <div style={{ fontSize: 30, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: cashBalance >= 0 ? C.green : C.red, lineHeight: 1 }}>
+                {brl(cashBalance)}
+              </div>
+            </div>
+            <button onClick={openNew} style={{
+              background: C.gold, color: C.bg, border: "none", borderRadius: 8,
+              padding: "9px 16px", fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans',sans-serif", cursor: "pointer"
+            }}>+ Lançar</button>
+          </div>
+
+          {/* Quick stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: `1px solid ${C.border}` }}>
+            {[
+              ["Entradas", cashTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0), C.green],
+              ["Saídas",   cashTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0), C.red],
+            ].map(([label, val, col]) => (
+              <div key={label} style={{ padding: "12px 20px", borderRight: label==="Entradas"?`1px solid ${C.border}`:"none" }}>
+                <div style={{ fontSize: 10, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginBottom: 3 }}>{label}</div>
+                <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{brl(val)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Lançamentos cash */}
+          <div style={{ flex: 1, overflowY: "auto", maxHeight: 380 }}>
+            {recentCash.length === 0 && (
+              <div style={{ padding: "32px 24px", textAlign: "center", color: C.muted, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+                Nenhum lançamento em dinheiro.<br/>
+                <span style={{ color: C.goldDim }}>Clique em "+ Lançar" para começar.</span>
+              </div>
+            )}
+            {recentCash.map((t, i) => {
+              const cat = catOf(t.category);
+              return (
+                <div key={t.id}>
+                  {i > 0 && <div style={{ height: 1, background: C.border }} />}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 20px" }}>
+                    <div style={{ fontSize: 18 }}>{cat.icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.description}</div>
+                      <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{fdate(t.date)} · {cat.label}</div>
+                    </div>
+                    <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: t.amount > 0 ? C.green : C.text, minWidth: 80, textAlign: "right" }}>
+                      {t.amount > 0 ? "+" : ""}{brl(t.amount)}
+                    </div>
+                    <div style={{ display: "flex", gap: 2 }}>
+                      <button onClick={() => openEdit(t)} style={{ background: "transparent", border: "none", color: C.muted, cursor: "pointer", fontSize: 13, padding: "3px 5px" }}>✏️</button>
+                      <button onClick={() => handleDelete(t.id)} style={{ background: "transparent", border: "none", color: C.muted, cursor: "pointer", fontSize: 13, padding: "3px 5px" }}>🗑️</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── FORM DINHEIRO ────────────────────────────────────────── */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 150 }}>
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 36, width: 440, maxWidth: "95vw" }}>
+            <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond',serif", color: C.text, marginBottom: 24 }}>
+              {editCash ? "Editar lançamento em dinheiro" : "Novo lançamento em dinheiro"}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Tipo */}
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["saida","💸 Saída",C.red],["entrada","💵 Entrada",C.green]].map(([t,l,col])=>(
+                  <button key={t} onClick={()=>sf("type",t)} style={{
+                    flex:1, padding:"10px", borderRadius:8, fontSize:13, fontWeight:500,
+                    fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+                    background: form.type===t ? col+"22" : "transparent",
+                    border: `1px solid ${form.type===t ? col : C.border}`,
+                    color: form.type===t ? col : C.muted
+                  }}>{l}</button>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>DESCRIÇÃO</div>
+                <input style={IS} placeholder="Ex: Feira, estacionamento..." value={form.description} onChange={e=>sf("description",e.target.value)} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>VALOR (R$)</div>
+                  <input style={IS} placeholder="0,00" value={form.amount} onChange={e=>sf("amount",e.target.value)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>DATA</div>
+                  <input type="date" style={IS} value={form.date} onChange={e=>sf("date",e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>CATEGORIA</div>
+                <select style={IS} value={form.category} onChange={e=>sf("category",e.target.value)}>
+                  {DEFAULT_CATEGORIES.filter(c=>c.id!=="receita"&&c.id!=="transferencia").map(c=>(
+                    <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>NOTAS</div>
+                <input style={IS} placeholder="Observações..." value={form.notes} onChange={e=>sf("notes",e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+              <button onClick={handleSave} style={{ flex: 1, background: C.gold, color: C.bg, border: "none", borderRadius: 8, padding: "12px", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans',sans-serif", cursor: "pointer" }}>
+                Salvar
+              </button>
+              <button onClick={() => { setShowForm(false); setEditCash(null); }} style={{ background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 20px", fontSize: 13, fontFamily: "'DM Sans',sans-serif", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [showConfig, setShowConfig]     = useState(false);
-  const [nav, setNav]                   = useState("dashboard");
-  const [transactions, setTransactions] = useState(MOCK_TRANSACTIONS);
-  const [accounts]                      = useState(MOCK_ACCOUNTS);
-  const [editTx, setEditTx]             = useState(null);
-  const [showForm, setShowForm]         = useState(false);
+  const [nav, setNav]           = useState("dashboard");
+  const [showConfig, setConfig] = useState(false);
+  const [transactions, setTxs]  = useState(MOCK_TXS);
+  const [accounts, setAccounts] = useState(() => {
+    try { const s = localStorage.getItem(ACCOUNTS_KEY); return s ? JSON.parse(s) : MOCK_ACCOUNTS; } catch { return MOCK_ACCOUNTS; }
+  });
+  const [editTx, setEditTx]     = useState(null);
+  const [showForm, setForm]     = useState(false);
+  const [toast, setToast]       = useState(null);
+  const [sbConnected, setSbConn] = useState(!!localStorage.getItem("sb_url"));
 
-  const handleSaveTx = (tx) => {
-    setTransactions(ts => {
-      const idx = ts.findIndex(t => t.id === tx.id);
-      if (idx >= 0) { const n = [...ts]; n[idx] = tx; return n; }
-      return [tx, ...ts];
+  const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null), 3500); };
+
+  // try load from Supabase on mount
+  useEffect(() => {
+    const sb = getSB();
+    if (!sb) return;
+    sb.from("transactions").then(t => t.select("*")).then(({ data }) => {
+      if (data?.length) { setTxs(data); showToast("Dados carregados do Supabase ✓"); }
+    }).catch(()=>{});
+  }, []);
+
+  const saveTx = async (tx) => {
+    setTxs(ts => {
+      const idx = ts.findIndex(t=>t.id===tx.id);
+      const next = idx>=0 ? ts.map((t,i)=>i===idx?tx:t) : [tx,...ts];
+      return next;
     });
-    setShowForm(false); setEditTx(null);
+    const sb = getSB();
+    if (sb) {
+      const tbl = await sb.from("transactions");
+      const exists = transactions.find(t=>t.id===tx.id);
+      if (exists) await tbl.update(tx, { id:tx.id });
+      else await tbl.insert(tx);
+    }
+    setForm(false); setEditTx(null);
+    showToast("Lançamento salvo!");
   };
-  const handleDeleteTx = (id) => setTransactions(ts => ts.filter(t => t.id !== id));
-  const handleImport = (rows) => setTransactions(ts => [...rows, ...ts]);
+
+  const deleteTx = async (id) => {
+    setTxs(ts=>ts.filter(t=>t.id!==id));
+    const sb = getSB(); if (sb) { const t = await sb.from("transactions"); await t.delete({id}); }
+    showToast("Lançamento removido", "warn");
+  };
+
+  const importTxs = (rows) => {
+    setTxs(ts=>[...rows,...ts]);
+    showToast(`${rows.length} lançamentos importados!`);
+  };
 
   const navItems = [
-    { id: "dashboard",  label: "Dashboard",  icon: "◈" },
-    { id: "extrato",    label: "Extrato",     icon: "≡" },
-    { id: "importar",   label: "Importar",    icon: "↑" },
-    { id: "contas",     label: "Contas",      icon: "⬡" },
+    { id:"dashboard",   label:"Dashboard",    icon:"◈" },
+    { id:"extrato",     label:"Extrato",      icon:"≡" },
+    { id:"relatorios",  label:"Relatórios",   icon:"📊" },
+    { id:"carteira",    label:"Carteira",     icon:"👜" },
+    { id:"metas",       label:"Metas",        icon:"🎯" },
+    { id:"importar",    label:"Importar",     icon:"↑" },
+    { id:"comprovantes",label:"Comprovantes", icon:"📷" },
+    { id:"contas",      label:"Contas",       icon:"⬡" },
   ];
+
+  const pageTitle = {
+    dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios & Análises",
+    carteira:"Carteira", metas:"Metas de Gastos",
+    importar:"Importar Extrato", comprovantes:"Comprovantes & Notas", contas:"Contas"
+  };
 
   return (
     <>
       <style>{FONTS}</style>
       <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: ${C.bg}; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: ${C.surface}; }
-        ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 3px; }
-        input[type=date]::-webkit-calendar-picker-indicator { filter: invert(.5); }
-        input[type=month]::-webkit-calendar-picker-indicator { filter: invert(.5); }
-        select option { background: ${C.card}; color: ${C.text}; }
+        *{box-sizing:border-box;margin:0;padding:0;}
+        body{background:${C.bg};}
+        ::-webkit-scrollbar{width:5px;height:5px;}
+        ::-webkit-scrollbar-track{background:${C.surface};}
+        ::-webkit-scrollbar-thumb{background:${C.border};border-radius:3px;}
+        input[type=date]::-webkit-calendar-picker-indicator,
+        input[type=month]::-webkit-calendar-picker-indicator{filter:invert(.5);}
+        select option{background:${C.card};color:${C.text};}
       `}</style>
 
-      {showConfig && <SupabaseConfig onSave={(u, k) => { localStorage.setItem("sb_url", u); localStorage.setItem("sb_key", k); setShowConfig(false); }} />}
-      {(showForm || editTx) && (
-        <TxForm accounts={accounts} initial={editTx} onSave={handleSaveTx} onClose={() => { setShowForm(false); setEditTx(null); }} />
-      )}
+      {showConfig && <SupabaseConfig onSave={()=>{ setSbConn(true); setConfig(false); showToast("Supabase conectado!"); }} onClose={()=>setConfig(false)} />}
+      {(showForm||editTx) && <TxForm accounts={accounts} initial={editTx} onSave={saveTx} onClose={()=>{ setForm(false); setEditTx(null); }} />}
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
 
-      <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans', sans-serif", background: C.bg }}>
+      <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
         {/* Sidebar */}
-        <div style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", padding: "0 0 20px", flexShrink: 0 }}>
-          {/* Logo */}
-          <div style={{ padding: "28px 24px 24px", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 11, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", marginBottom: 4 }}>Família</div>
-            <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond', serif", color: C.goldLight, fontWeight: 600, lineHeight: 1 }}>Fontanezzi</div>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Controle Financeiro</div>
+        <div style={{ width:224, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", flexShrink:0 }}>
+          <div style={{ padding:"28px 24px 22px", borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
+            <div style={{ fontSize:23, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600, lineHeight:1 }}>Fontanezzi</div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:4, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
+            <div style={{ marginTop:10, display:"flex", gap:6, alignItems:"center" }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background: sbConnected?C.green:C.muted }} />
+              <span style={{ fontSize:10, color: sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                {sbConnected?"Supabase conectado":"Modo demo"}
+              </span>
+            </div>
           </div>
-          {/* Nav */}
-          <nav style={{ padding: "16px 12px", flex: 1 }}>
-            {navItems.map(item => (
-              <button key={item.id} onClick={() => setNav(item.id)} style={{
-                display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 14px",
-                borderRadius: 10, border: "none", cursor: "pointer", marginBottom: 4, textAlign: "left",
-                background: nav === item.id ? C.gold + "18" : "transparent",
-                color: nav === item.id ? C.goldLight : C.soft,
-                fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: nav === item.id ? 500 : 400,
-                borderLeft: nav === item.id ? `2px solid ${C.gold}` : "2px solid transparent",
-                transition: "all .15s"
+          <nav style={{ padding:"14px 12px", flex:1 }}>
+            {navItems.map(item=>(
+              <button key={item.id} onClick={()=>setNav(item.id)} style={{
+                display:"flex", alignItems:"center", gap:10, width:"100%", padding:"10px 14px",
+                borderRadius:10, border:"none", cursor:"pointer", marginBottom:2, textAlign:"left",
+                background: nav===item.id ? C.gold+"18" : "transparent",
+                color: nav===item.id ? C.goldLight : C.soft,
+                fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight: nav===item.id?500:400,
+                borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
               }}>
-                <span style={{ fontSize: 16, width: 20, textAlign: "center" }}>{item.icon}</span>
+                <span style={{ width:20, textAlign:"center", fontSize:14 }}>{item.icon}</span>
                 {item.label}
               </button>
             ))}
           </nav>
-          {/* Footer */}
-          <div style={{ padding: "0 12px" }}>
-            <button onClick={() => setShowConfig(true)} style={{
-              display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 14px",
-              borderRadius: 10, border: "none", cursor: "pointer",
-              background: "transparent", color: C.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 12
-            }}>⚙ Configurações</button>
+          <div style={{ padding:"0 12px 20px" }}>
+            <button onClick={()=>setConfig(true)} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"10px 14px", borderRadius:10, border:"none", cursor:"pointer", background:"transparent", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:12 }}>
+              ⚙ Configurações
+            </button>
           </div>
         </div>
 
         {/* Main */}
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {/* Topbar */}
-          <div style={{ padding: "20px 32px", borderBottom: `1px solid ${C.border}`, background: C.surface, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ flex:1, overflow:"auto", display:"flex", flexDirection:"column" }}>
+          <div style={{ padding:"18px 32px", borderBottom:`1px solid ${C.border}`, background:C.surface, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
             <div>
-              <div style={{ fontSize: 11, color: C.muted, letterSpacing: 2, textTransform: "uppercase" }}>
-                {navItems.find(n => n.id === nav)?.label}
-              </div>
-              <div style={{ fontSize: 24, fontFamily: "'Cormorant Garamond', serif", color: C.text, fontWeight: 500, lineHeight: 1.1, marginTop: 2 }}>
-                {nav === "dashboard" ? new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" }) :
-                 nav === "extrato" ? "Movimentações" :
-                 nav === "importar" ? "Importar Extrato" : "Minhas Contas"}
-              </div>
+              <div style={{ fontSize:11, color:C.muted, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>{navItems.find(n=>n.id===nav)?.label}</div>
+              <div style={{ fontSize:23, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:500, marginTop:2 }}>{pageTitle[nav]}</div>
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <div style={{ fontSize: 12, color: C.muted }}>
-                <span style={{ marginRight: 6 }}>👨</span>Rodrigo
-                <span style={{ margin: "0 8px", color: C.border }}>|</span>
-                <span style={{ marginRight: 6 }}>👩</span>Esposa
-              </div>
+            <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", gap:12, alignItems:"center" }}>
+              <span>👨 Rodrigo</span>
+              <span style={{ color:C.border }}>|</span>
+              <span>👩 Cláudia</span>
             </div>
           </div>
-
-          {/* Content */}
-          <div style={{ padding: "28px 32px" }}>
-            {nav === "dashboard" && <Dashboard transactions={transactions} accounts={accounts} />}
-            {nav === "extrato"   && <Extrato transactions={transactions} accounts={accounts} onEdit={t => { setEditTx(t); }} onDelete={handleDeleteTx} onAdd={() => setShowForm(true)} />}
-            {nav === "importar"  && <UploadExtrato accounts={accounts} onImport={handleImport} />}
-            {nav === "contas"    && <Contas accounts={accounts} onAdd={() => {}} onEdit={() => {}} />}
+          <div style={{ padding:"26px 32px", flex:1 }}>
+            {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} />}
+            {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
+            {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
+            {nav==="carteira"     && <Carteira     accounts={accounts} />}
+            {nav==="metas"        && <Metas        transactions={transactions} />}
+            {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} allTxs={transactions} />}
+            {nav==="comprovantes" && <Comprovantes accounts={accounts} onAddTx={saveTx} />}
+            {nav==="contas"       && <ContasView   accounts={accounts} setAccounts={setAccounts} />}
           </div>
         </div>
       </div>
