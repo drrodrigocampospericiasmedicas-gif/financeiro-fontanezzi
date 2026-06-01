@@ -1104,32 +1104,29 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
     }).filter(Boolean);
   };
 
-  // Parse PDF via AI — sends base64 PDF and extracts transactions
+  // Parse PDF via AI — correct document format for Claude API
   const parsePDFwithAI = async (base64, mime) => {
     setPdfStatus("🤖 IA lendo o extrato PDF...");
-    const prompt = `Você recebeu um extrato bancário brasileiro em PDF. Pode ser do Itaú, Nubank, PicPay ou outro banco.
 
-O extrato do app Itaú geralmente tem colunas como: Data | Histórico/Descrição | Valor | Saldo
-O Nubank tem: Data | Descrição | Valor
-O PicPay tem: Data | Descrição | Tipo | Valor
+    const prompt = `Você recebeu um extrato bancário brasileiro em PDF. Pode ser Itaú, Nubank, PicPay ou outro banco.
 
-Extraia TODAS as transações individuais e retorne SOMENTE um array JSON, sem nenhum texto antes ou depois, sem markdown, sem bloco de código.
+Extraia TODAS as transações individuais e retorne SOMENTE um array JSON válido, sem markdown, sem texto antes ou depois.
 
-Formato de cada objeto:
-{"date":"YYYY-MM-DD","description":"texto da transação","amount":valor_numerico}
+Cada objeto deve ter:
+{"date":"YYYY-MM-DD","description":"texto","amount":valor_numerico}
 
 Regras:
-- Débitos, saídas, compras, pagamentos, tarifas = amount NEGATIVO (ex: -150.00)
-- Créditos, entradas, Pix recebido, salário, rendimento = amount POSITIVO (ex: 3500.00)  
-- Converta datas brasileiras DD/MM/AAAA para YYYY-MM-DD
-- Se o ano não estiver explícito, use ${new Date().getFullYear()}
-- Ignore linhas de saldo, cabeçalho, rodapé, totais
-- Retorne [] se não encontrar nenhuma transação
+- Débitos, saídas, pagamentos, compras, tarifas = amount NEGATIVO
+- Créditos, entradas, Pix recebido, salário, rendimento = amount POSITIVO
+- Converta datas DD/MM/AAAA para YYYY-MM-DD
+- Ignore linhas "SALDO DO DIA", totais, cabeçalho e rodapé
+- Inclua estornos (EST...) pois podem ser relevantes
+- Retorne [] se não encontrar transações
 
-Responda APENAS o array JSON, começando com [ e terminando com ]:`;
+Responda APENAS o array JSON começando com [ e terminando com ]:`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1138,40 +1135,42 @@ Responda APENAS o array JSON, começando com [ e terminando com ]:`;
           messages: [{
             role: "user",
             content: [
-              { type: "document", source: { type: "base64", media_type: mime, data: base64 } },
+              {
+                type: "document",
+                source: {
+                  type: "base64",
+                  media_type: "application/pdf",
+                  data: base64
+                }
+              },
               { type: "text", text: prompt }
             ]
           }]
         })
       });
 
-      const data = await response.json();
+      const data = await res.json();
 
-      if (!response.ok) {
-        console.error("API error:", data);
-        setPdfStatus("❌ Erro na API: " + (data.error?.message || "desconhecido"));
+      if (!res.ok) {
+        setPdfStatus("❌ Erro API: " + (data.error?.message || JSON.stringify(data)));
         return [];
       }
 
       const text = data.content?.[0]?.text || "";
-      console.log("AI response:", text.slice(0, 200));
-
-      // Extract JSON array from response
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) {
-        setPdfStatus("❌ IA não retornou dados estruturados");
-        console.error("No JSON array found in:", text);
+        setPdfStatus("❌ IA não retornou JSON válido");
         return [];
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
-      if (!Array.isArray(parsed)) { setPdfStatus("❌ Formato inesperado"); return []; }
+      if (!Array.isArray(parsed)) return [];
 
       const valid = parsed.map(t => ({
-        id: "imp_"+Math.random().toString(36).slice(2),
-        date: String(t.date||"").replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1") || fmt(TODAY),
-        description: String(t.description||t.memo||t.historico||"").trim(),
-        amount: parseFloat(String(t.amount||t.valor||0).replace(",","."))||0,
+        id: "imp_" + Math.random().toString(36).slice(2),
+        date: String(t.date || "").replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1") || fmt(TODAY),
+        description: String(t.description || "").trim(),
+        amount: parseFloat(String(t.amount || 0).replace(",", ".")) || 0,
         accountId: selAcc,
         category: "outros",
         keep: true,
@@ -1181,9 +1180,8 @@ Responda APENAS o array JSON, começando com [ e terminando com ]:`;
       setPdfStatus(`✅ ${valid.length} transações encontradas`);
       return valid;
 
-    } catch(e) {
-      console.error("PDF parse error:", e);
-      setPdfStatus("❌ Erro ao processar: " + e.message);
+    } catch (e) {
+      setPdfStatus("❌ " + e.message);
       return [];
     }
   };
