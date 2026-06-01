@@ -281,7 +281,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
   const r = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{ role:"user", content }] })
+    body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:1000, messages:[{ role:"user", content }] })
   });
   const d = await r.json();
   return d.content?.[0]?.text || "";
@@ -1185,7 +1185,7 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-haiku-4-5-20251001",
           max_tokens: 4000,
           messages: [{ role: "user", content:
 `Extrato bancário brasileiro. Retorne SOMENTE array JSON sem markdown.
