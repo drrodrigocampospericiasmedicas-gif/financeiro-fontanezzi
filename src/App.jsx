@@ -278,7 +278,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
   const content = [];
   if (imageBase64) content.push({ type:"image", source:{ type:"base64", media_type: imageMime || "image/jpeg", data: imageBase64 } });
   content.push({ type:"text", text: prompt });
-  const r = await fetch("/api/claude", {
+  const r = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/claude-proxy", {
     method:"POST",
     headers:{ "Content-Type":"application/json" },
     body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{ role:"user", content }] })
@@ -1181,7 +1181,7 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
 
       status(`🤖 Texto extraído (${fullText.length} chars). Enviando para IA...`);
 
-      const res = await fetch("/api/claude", {
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/claude-proxy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
