@@ -1925,34 +1925,105 @@ export default function App() {
     importar:"Importar Extrato", comprovantes:"Comprovantes & Notas", contas:"Contas"
   };
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // Bottom nav items (most used, max 5)
+  const bottomNav = [
+    { id:"dashboard",   label:"Início",    icon:"◈" },
+    { id:"extrato",     label:"Extrato",   icon:"≡" },
+    { id:"carteira",    label:"Carteira",  icon:"👜" },
+    { id:"relatorios",  label:"Relatórios",icon:"📊" },
+    { id:"mais",        label:"Mais",      icon:"☰"  },
+  ];
+
+  const handleNav = (id) => {
+    if (id === "mais") { setMenuOpen(true); return; }
+    setNav(id); setMenuOpen(false);
+  };
+
   return (
     <>
       <style>{FONTS}</style>
       <style>{`
         *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:${C.bg};}
-        ::-webkit-scrollbar{width:5px;height:5px;}
+        body{background:${C.bg}; overflow-x:hidden;}
+        ::-webkit-scrollbar{width:4px;height:4px;}
         ::-webkit-scrollbar-track{background:${C.surface};}
         ::-webkit-scrollbar-thumb{background:${C.border};border-radius:3px;}
         input[type=date]::-webkit-calendar-picker-indicator,
         input[type=month]::-webkit-calendar-picker-indicator{filter:invert(.5);}
         select option{background:${C.card};color:${C.text};}
+        @media(max-width:767px){
+          .desktop-sidebar{display:none!important;}
+          .mobile-bottomnav{display:flex!important;}
+          .topbar-users{display:none!important;}
+          .page-pad{padding:16px!important;}
+          .topbar-pad{padding:14px 16px!important;}
+        }
+        @media(min-width:768px){
+          .mobile-bottomnav{display:none!important;}
+          .mobile-menu-overlay{display:none!important;}
+        }
       `}</style>
 
       {showConfig && <SupabaseConfig onSave={()=>{ setSbConn(true); setConfig(false); showToast("Supabase conectado!"); }} onClose={()=>setConfig(false)} />}
       {(showForm||editTx) && <TxForm accounts={accounts} initial={editTx} onSave={saveTx} onClose={()=>{ setForm(false); setEditTx(null); }} />}
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
+      {/* Mobile drawer menu */}
+      {menuOpen && (
+        <div className="mobile-menu-overlay" style={{ position:"fixed", inset:0, zIndex:300, display:"flex" }}>
+          {/* backdrop */}
+          <div onClick={()=>setMenuOpen(false)} style={{ position:"absolute", inset:0, background:"#000a" }} />
+          {/* drawer */}
+          <div style={{ position:"relative", width:280, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", height:"100%", zIndex:1 }}>
+            <div style={{ padding:"28px 24px 20px", borderBottom:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
+              <div style={{ fontSize:24, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600 }}>Fontanezzi</div>
+              <div style={{ fontSize:11, color:C.muted, marginTop:4, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
+              <div style={{ marginTop:10, display:"flex", gap:6, alignItems:"center" }}>
+                <div style={{ width:6, height:6, borderRadius:"50%", background:sbConnected?C.green:C.muted }} />
+                <span style={{ fontSize:10, color:sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                  {sbConnected?"Supabase conectado":"Modo demo"}
+                </span>
+              </div>
+            </div>
+            <nav style={{ padding:"12px", flex:1, overflowY:"auto" }}>
+              {navItems.map(item=>(
+                <button key={item.id} onClick={()=>handleNav(item.id)} style={{
+                  display:"flex", alignItems:"center", gap:12, width:"100%", padding:"13px 16px",
+                  borderRadius:12, border:"none", cursor:"pointer", marginBottom:3, textAlign:"left",
+                  background: nav===item.id ? C.gold+"18" : "transparent",
+                  color: nav===item.id ? C.goldLight : C.soft,
+                  fontFamily:"'DM Sans',sans-serif", fontSize:15, fontWeight:nav===item.id?500:400,
+                  borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
+                }}>
+                  <span style={{ width:22, textAlign:"center", fontSize:16 }}>{item.icon}</span>
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            <div style={{ padding:"0 12px 32px" }}>
+              <button onClick={()=>{setConfig(true);setMenuOpen(false);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"13px 16px", borderRadius:12, border:"none", cursor:"pointer", background:"transparent", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:14 }}>
+                ⚙ Configurações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
-        {/* Sidebar */}
-        <div style={{ width:224, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", flexShrink:0 }}>
+
+        {/* Desktop Sidebar */}
+        <div className="desktop-sidebar" style={{ width:224, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", flexShrink:0 }}>
           <div style={{ padding:"28px 24px 22px", borderBottom:`1px solid ${C.border}` }}>
             <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
             <div style={{ fontSize:23, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600, lineHeight:1 }}>Fontanezzi</div>
             <div style={{ fontSize:11, color:C.muted, marginTop:4, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
             <div style={{ marginTop:10, display:"flex", gap:6, alignItems:"center" }}>
-              <div style={{ width:6, height:6, borderRadius:"50%", background: sbConnected?C.green:C.muted }} />
-              <span style={{ fontSize:10, color: sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:sbConnected?C.green:C.muted }} />
+              <span style={{ fontSize:10, color:sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
                 {sbConnected?"Supabase conectado":"Modo demo"}
               </span>
             </div>
@@ -1964,7 +2035,7 @@ export default function App() {
                 borderRadius:10, border:"none", cursor:"pointer", marginBottom:2, textAlign:"left",
                 background: nav===item.id ? C.gold+"18" : "transparent",
                 color: nav===item.id ? C.goldLight : C.soft,
-                fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight: nav===item.id?500:400,
+                fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:nav===item.id?500:400,
                 borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
               }}>
                 <span style={{ width:20, textAlign:"center", fontSize:14 }}>{item.icon}</span>
@@ -1979,20 +2050,30 @@ export default function App() {
           </div>
         </div>
 
-        {/* Main */}
-        <div style={{ flex:1, overflow:"auto", display:"flex", flexDirection:"column" }}>
-          <div style={{ padding:"18px 32px", borderBottom:`1px solid ${C.border}`, background:C.surface, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
-            <div>
-              <div style={{ fontSize:11, color:C.muted, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>{navItems.find(n=>n.id===nav)?.label}</div>
-              <div style={{ fontSize:23, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:500, marginTop:2 }}>{pageTitle[nav]}</div>
+        {/* Main content */}
+        <div style={{ flex:1, overflow:"auto", display:"flex", flexDirection:"column", minWidth:0 }}>
+
+          {/* Topbar */}
+          <div className="topbar-pad" style={{ padding:"18px 32px", borderBottom:`1px solid ${C.border}`, background:C.surface, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              {/* Hamburger — mobile only */}
+              <button onClick={()=>setMenuOpen(true)} style={{
+                display:"none", background:"transparent", border:"none", color:C.soft,
+                fontSize:22, cursor:"pointer", padding:"0 4px", lineHeight:1,
+                // shown via CSS below
+              }} className="hamburger">☰</button>
+              <div>
+                <div style={{ fontSize:11, color:C.muted, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>{navItems.find(n=>n.id===nav)?.label}</div>
+                <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:500, marginTop:1 }}>{pageTitle[nav]}</div>
+              </div>
             </div>
-            <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", gap:12, alignItems:"center" }}>
-              <span>👨 Rodrigo</span>
-              <span style={{ color:C.border }}>|</span>
-              <span>👩 Cláudia</span>
+            <div className="topbar-users" style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", gap:12, alignItems:"center" }}>
+              <span>👨 Rodrigo</span><span style={{color:C.border}}>|</span><span>👩 Cláudia</span>
             </div>
           </div>
-          <div style={{ padding:"26px 32px", flex:1 }}>
+
+          {/* Page content */}
+          <div className="page-pad" style={{ padding:"24px 32px", flex:1, paddingBottom:80 }}>
             {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} />}
             {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
             {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
@@ -2004,6 +2085,37 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Mobile bottom navigation */}
+      <div className="mobile-bottomnav" style={{
+        position:"fixed", bottom:0, left:0, right:0, zIndex:200,
+        background:C.surface, borderTop:`1px solid ${C.border}`,
+        display:"none", // shown via CSS
+        alignItems:"center", justifyContent:"space-around",
+        padding:"8px 0 max(8px, env(safe-area-inset-bottom))",
+      }}>
+        {bottomNav.map(item=>{
+          const active = item.id !== "mais" && nav === item.id;
+          return (
+            <button key={item.id} onClick={()=>handleNav(item.id)} style={{
+              display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+              background:"transparent", border:"none", cursor:"pointer", flex:1, padding:"4px 0",
+              color: active ? C.goldLight : C.muted,
+            }}>
+              <span style={{ fontSize:20, lineHeight:1 }}>{item.icon}</span>
+              <span style={{ fontSize:10, fontFamily:"'DM Sans',sans-serif", fontWeight: active?500:400 }}>{item.label}</span>
+              {active && <div style={{ width:16, height:2, background:C.gold, borderRadius:2, marginTop:1 }} />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Extra CSS for hamburger visibility */}
+      <style>{`
+        @media(max-width:767px){
+          .hamburger{display:block!important;}
+        }
+      `}</style>
     </>
   );
 }
