@@ -36,43 +36,120 @@ const DEFAULT_CATEGORIES = [
   { id: "outros",        label: "Outros",        icon: "📦",  color: "#9a98a0" },
 ];
 
-// ─── SUPABASE CLIENT (lazy init) ──────────────────────────────────────────────
-let _sb = null;
-function getSB() {
-  const url = localStorage.getItem("sb_url");
-  const key = localStorage.getItem("sb_key");
-  if (!url || !key) return null;
-  if (_sb) return _sb;
-  // minimal Supabase REST client (no npm needed in artifact)
-  _sb = {
-    url, key,
-    headers: { "apikey": key, "Authorization": `Bearer ${key}`, "Content-Type": "application/json", "Prefer": "return=representation" },
-    async from(table) {
-      const base = `${url}/rest/v1/${table}`;
-      return {
-        async select(q = "*") {
-          const r = await fetch(`${base}?select=${q}&order=date.desc`, { headers: _sb.headers });
-          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
-        },
-        async insert(row) {
-          const r = await fetch(base, { method: "POST", headers: _sb.headers, body: JSON.stringify(row) });
-          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
-        },
-        async update(row, match) {
-          const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
-          const r = await fetch(`${base}?${qs}`, { method: "PATCH", headers: _sb.headers, body: JSON.stringify(row) });
-          return r.ok ? { data: await r.json(), error: null } : { data: null, error: await r.text() };
-        },
-        async delete(match) {
-          const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
-          const r = await fetch(`${base}?${qs}`, { method: "DELETE", headers: _sb.headers });
-          return r.ok ? { data: null, error: null } : { data: null, error: await r.text() };
-        },
-      };
+// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+let _sbUrl = null, _sbKey = null;
+
+function getSBCreds() {
+  _sbUrl = localStorage.getItem("sb_url");
+  _sbKey = localStorage.getItem("sb_key");
+  return { url: _sbUrl, key: _sbKey };
+}
+
+function authHeaders(token) {
+  const { key } = getSBCreds();
+  return {
+    "apikey": key,
+    "Authorization": `Bearer ${token || key}`,
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+  };
+}
+
+// Auth functions
+async function sbSignUp(email, password) {
+  const { url, key } = getSBCreds();
+  if (!url) return { error: "Supabase não configurado" };
+  const r = await fetch(`${url}/auth/v1/signup`, {
+    method: "POST",
+    headers: { "apikey": key, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  const d = await r.json();
+  return r.ok ? { data: d } : { error: d.error_description || d.msg || "Erro ao cadastrar" };
+}
+
+async function sbSignIn(email, password) {
+  const { url, key } = getSBCreds();
+  if (!url) return { error: "Supabase não configurado" };
+  const r = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { "apikey": key, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+  const d = await r.json();
+  if (r.ok) {
+    localStorage.setItem("sb_token", d.access_token);
+    localStorage.setItem("sb_user", JSON.stringify({ email, id: d.user?.id }));
+    return { data: d };
+  }
+  return { error: d.error_description || d.msg || "E-mail ou senha incorretos" };
+}
+
+async function sbSignInGoogle() {
+  const { url } = getSBCreds();
+  if (!url) return;
+  const redirect = window.location.origin;
+  window.location.href = `${url}/auth/v1/authorize?provider=google&redirect_to=${redirect}`;
+}
+
+async function sbSignOut() {
+  const { url, key } = getSBCreds();
+  const token = localStorage.getItem("sb_token");
+  if (url && token) {
+    await fetch(`${url}/auth/v1/logout`, {
+      method: "POST",
+      headers: { "apikey": key, "Authorization": `Bearer ${token}` }
+    }).catch(() => {});
+  }
+  localStorage.removeItem("sb_token");
+  localStorage.removeItem("sb_user");
+}
+
+// Check Google OAuth callback token in URL hash
+function checkOAuthCallback() {
+  const hash = window.location.hash;
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.replace("#", ""));
+  const token = params.get("access_token");
+  if (token) {
+    localStorage.setItem("sb_token", token);
+    const user = { email: params.get("email") || "usuário", id: null };
+    localStorage.setItem("sb_user", JSON.stringify(user));
+    window.history.replaceState(null, "", window.location.pathname);
+    return token;
+  }
+  return null;
+}
+
+// DB helpers (uses auth token if available)
+async function dbFrom(table) {
+  const { url } = getSBCreds();
+  if (!url) return null;
+  const token = localStorage.getItem("sb_token");
+  const base = `${url}/rest/v1/${table}`;
+  const hdrs = authHeaders(token);
+  return {
+    async select(q = "*", extra = "") {
+      const r = await fetch(`${base}?select=${q}&order=date.desc${extra}`, { headers: hdrs });
+      return r.ok ? { data: await r.json() } : { error: await r.text() };
+    },
+    async insert(row) {
+      const r = await fetch(base, { method: "POST", headers: hdrs, body: JSON.stringify(row) });
+      return r.ok ? { data: await r.json() } : { error: await r.text() };
+    },
+    async update(row, match) {
+      const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
+      const r = await fetch(`${base}?${qs}`, { method: "PATCH", headers: hdrs, body: JSON.stringify(row) });
+      return r.ok ? { data: await r.json() } : { error: await r.text() };
+    },
+    async del(match) {
+      const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
+      const r = await fetch(`${base}?${qs}`, { method: "DELETE", headers: hdrs });
+      return r.ok ? {} : { error: await r.text() };
     }
   };
-  return _sb;
 }
+
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const TODAY = new Date();
@@ -1856,42 +1933,199 @@ const Carteira = ({ accounts }) => {
   );
 };
 
+// ─── LOGIN ────────────────────────────────────────────────────────────────────
+const Login = ({ onLogin }) => {
+  const [mode, setMode]       = useState("login"); // login | signup
+  const [email, setEmail]     = useState("");
+  const [pass, setPass]       = useState("");
+  const [pass2, setPass2]     = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
+  const [info, setInfo]       = useState("");
+
+  const hasCreds = !!localStorage.getItem("sb_url");
+
+  const handle = async () => {
+    if (!hasCreds) { setError("Configure o Supabase primeiro nas ⚙ Configurações abaixo."); return; }
+    if (!email || !pass) { setError("Preencha e-mail e senha."); return; }
+    if (mode === "signup" && pass !== pass2) { setError("As senhas não coincidem."); return; }
+    setLoading(true); setError(""); setInfo("");
+    if (mode === "signup") {
+      const { error: e } = await sbSignUp(email, pass);
+      if (e) { setError(e); }
+      else { setInfo("Conta criada! Verifique seu e-mail para confirmar, depois faça login."); setMode("login"); }
+    } else {
+      const { error: e } = await sbSignIn(email, pass);
+      if (e) setError(e);
+      else onLogin();
+    }
+    setLoading(false);
+  };
+
+  const [showConfig, setShowConfig] = useState(false);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+      <style>{FONTS}</style>
+      <style>{`*{box-sizing:border-box;margin:0;padding:0;} body{background:${C.bg};}`}</style>
+
+      {showConfig && <SupabaseConfig onSave={()=>setShowConfig(false)} onClose={()=>setShowConfig(false)} />}
+
+      {/* Logo */}
+      <div style={{ textAlign:"center", marginBottom:40 }}>
+        <div style={{ fontSize:11, color:C.goldDim, letterSpacing:4, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Família</div>
+        <div style={{ fontSize:42, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600, lineHeight:1 }}>Fontanezzi</div>
+        <div style={{ fontSize:13, color:C.muted, marginTop:8, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
+      </div>
+
+      {/* Card */}
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:"32px 28px", width:"100%", maxWidth:400 }}>
+        {/* Tabs */}
+        <div style={{ display:"flex", gap:0, marginBottom:28, background:C.bg, borderRadius:10, padding:4 }}>
+          {[["login","Entrar"],["signup","Criar conta"]].map(([m,l])=>(
+            <button key={m} onClick={()=>{setMode(m);setError("");setInfo("");}} style={{
+              flex:1, padding:"9px", borderRadius:8, border:"none", cursor:"pointer", fontSize:13,
+              fontFamily:"'DM Sans',sans-serif", fontWeight:500,
+              background: mode===m ? C.surface : "transparent",
+              color: mode===m ? C.text : C.muted,
+            }}>{l}</button>
+          ))}
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>E-MAIL</div>
+            <input style={IS} type="email" placeholder="seu@email.com" value={email}
+              onChange={e=>setEmail(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handle()} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>SENHA</div>
+            <input style={IS} type="password" placeholder="••••••••" value={pass}
+              onChange={e=>setPass(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handle()} />
+          </div>
+          {mode==="signup" && (
+            <div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CONFIRMAR SENHA</div>
+              <input style={IS} type="password" placeholder="••••••••" value={pass2}
+                onChange={e=>setPass2(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handle()} />
+            </div>
+          )}
+
+          {error && <div style={{ fontSize:12, color:C.red, fontFamily:"'DM Sans',sans-serif", background:C.red+"15", borderRadius:8, padding:"10px 14px" }}>{error}</div>}
+          {info  && <div style={{ fontSize:12, color:C.green, fontFamily:"'DM Sans',sans-serif", background:C.green+"15", borderRadius:8, padding:"10px 14px" }}>{info}</div>}
+
+          <button onClick={handle} disabled={loading} style={{
+            background: loading ? C.border : C.gold, color: C.bg, border:"none", borderRadius:10,
+            padding:"14px", fontSize:14, fontWeight:600, fontFamily:"'DM Sans',sans-serif",
+            cursor: loading?"not-allowed":"pointer", marginTop:4,
+          }}>
+            {loading ? "Aguarde..." : mode==="login" ? "Entrar" : "Criar conta"}
+          </button>
+
+          {/* Divider */}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ flex:1, height:1, background:C.border }} />
+            <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>ou</span>
+            <div style={{ flex:1, height:1, background:C.border }} />
+          </div>
+
+          {/* Google */}
+          <button onClick={sbSignInGoogle} disabled={!hasCreds} style={{
+            background:"transparent", border:`1px solid ${C.border}`, borderRadius:10,
+            padding:"13px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+            color:C.soft, display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.8 2.5 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.8 6C12.3 13 17.7 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 7.1-10 7.1-17z"/>
+              <path fill="#FBBC05" d="M10.4 28.7A14.6 14.6 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.8-6A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.8-6z"/>
+              <path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.6 2.2-7.7 2.2-6.3 0-11.7-4.3-13.6-10l-7.8 6C6.6 42.6 14.6 48 24 48z"/>
+            </svg>
+            Entrar com Google
+          </button>
+        </div>
+      </div>
+
+      {/* Config link */}
+      <button onClick={()=>setShowConfig(true)} style={{
+        marginTop:24, background:"transparent", border:"none", color:C.muted,
+        fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+      }}>
+        {hasCreds ? "✅ Supabase configurado" : "⚙ Configurar Supabase"} →
+      </button>
+    </div>
+  );
+};
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [user, setUser]         = useState(() => { try { return JSON.parse(localStorage.getItem("sb_user")); } catch { return null; } });
   const [nav, setNav]           = useState("dashboard");
   const [showConfig, setConfig] = useState(false);
-  const [transactions, setTxs]  = useState(MOCK_TXS);
+  const [transactions, setTxs]  = useState([]);
   const [accounts, setAccounts] = useState(() => {
     try { const s = localStorage.getItem(ACCOUNTS_KEY); return s ? JSON.parse(s) : MOCK_ACCOUNTS; } catch { return MOCK_ACCOUNTS; }
   });
   const [editTx, setEditTx]     = useState(null);
   const [showForm, setForm]     = useState(false);
   const [toast, setToast]       = useState(null);
-  const [sbConnected, setSbConn] = useState(!!localStorage.getItem("sb_url"));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const sbConnected             = !!localStorage.getItem("sb_url");
 
-  const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null), 3500); };
+  const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
-  // try load from Supabase on mount
+  // Check OAuth callback on mount
   useEffect(() => {
-    const sb = getSB();
-    if (!sb) return;
-    sb.from("transactions").then(t => t.select("*")).then(({ data }) => {
-      if (data?.length) { setTxs(data); showToast("Dados carregados do Supabase ✓"); }
-    }).catch(()=>{});
+    const token = checkOAuthCallback();
+    if (token) {
+      const u = JSON.parse(localStorage.getItem("sb_user") || "{}");
+      setUser(u);
+    }
   }, []);
 
+  // Load data from Supabase when user logs in
+  useEffect(() => {
+    if (!user || !sbConnected) {
+      // not logged in — use demo data
+      setTxs(MOCK_TXS);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      dbFrom("transactions").then(t => t?.select("*")),
+      dbFrom("accounts").then(t => t?.select("*")),
+    ]).then(([txRes, accRes]) => {
+      if (txRes?.data?.length)  setTxs(txRes.data);
+      else setTxs([]); // empty = real account, no demo data
+      if (accRes?.data?.length) {
+        setAccounts(accRes.data);
+        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accRes.data));
+      }
+      setLoading(false);
+    }).catch(() => { setTxs([]); setLoading(false); });
+  }, [user, sbConnected]);
+
+  const handleLogin = () => {
+    try { setUser(JSON.parse(localStorage.getItem("sb_user"))); } catch {}
+  };
+
+  const handleLogout = async () => {
+    await sbSignOut();
+    setUser(null);
+    setTxs(MOCK_TXS);
+    setMenuOpen(false);
+  };
+
   const saveTx = async (tx) => {
-    setTxs(ts => {
-      const idx = ts.findIndex(t=>t.id===tx.id);
-      const next = idx>=0 ? ts.map((t,i)=>i===idx?tx:t) : [tx,...ts];
-      return next;
-    });
-    const sb = getSB();
-    if (sb) {
-      const tbl = await sb.from("transactions");
+    setTxs(ts => { const i = ts.findIndex(t=>t.id===tx.id); return i>=0 ? ts.map((t,idx)=>idx===i?tx:t) : [tx,...ts]; });
+    const tbl = await dbFrom("transactions");
+    if (tbl) {
       const exists = transactions.find(t=>t.id===tx.id);
-      if (exists) await tbl.update(tx, { id:tx.id });
-      else await tbl.insert(tx);
+      if (exists) await tbl.update(tx, {id:tx.id}); else await tbl.insert(tx);
     }
     setForm(false); setEditTx(null);
     showToast("Lançamento salvo!");
@@ -1899,14 +2133,15 @@ export default function App() {
 
   const deleteTx = async (id) => {
     setTxs(ts=>ts.filter(t=>t.id!==id));
-    const sb = getSB(); if (sb) { const t = await sb.from("transactions"); await t.delete({id}); }
-    showToast("Lançamento removido", "warn");
+    const tbl = await dbFrom("transactions");
+    if (tbl) await tbl.del({id});
+    showToast("Removido","warn");
   };
 
-  const importTxs = (rows) => {
-    setTxs(ts=>[...rows,...ts]);
-    showToast(`${rows.length} lançamentos importados!`);
-  };
+  const importTxs = (rows) => { setTxs(ts=>[...rows,...ts]); showToast(`${rows.length} lançamentos importados!`); };
+
+  // Show login screen if not authenticated
+  if (!user) return <Login onLogin={handleLogin} />;
 
   const navItems = [
     { id:"dashboard",   label:"Dashboard",    icon:"◈" },
@@ -1914,208 +2149,175 @@ export default function App() {
     { id:"relatorios",  label:"Relatórios",   icon:"📊" },
     { id:"carteira",    label:"Carteira",     icon:"👜" },
     { id:"metas",       label:"Metas",        icon:"🎯" },
-    { id:"importar",    label:"Importar",     icon:"↑" },
+    { id:"importar",    label:"Importar",     icon:"↑"  },
     { id:"comprovantes",label:"Comprovantes", icon:"📷" },
-    { id:"contas",      label:"Contas",       icon:"⬡" },
+    { id:"contas",      label:"Contas",       icon:"⬡"  },
   ];
 
   const pageTitle = {
-    dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios & Análises",
-    carteira:"Carteira", metas:"Metas de Gastos",
-    importar:"Importar Extrato", comprovantes:"Comprovantes & Notas", contas:"Contas"
+    dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios",
+    carteira:"Carteira", metas:"Metas", importar:"Importar Extrato",
+    comprovantes:"Comprovantes", contas:"Contas"
   };
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-
-  // Bottom nav items (most used, max 5)
   const bottomNav = [
-    { id:"dashboard",   label:"Início",    icon:"◈" },
-    { id:"extrato",     label:"Extrato",   icon:"≡" },
-    { id:"carteira",    label:"Carteira",  icon:"👜" },
-    { id:"relatorios",  label:"Relatórios",icon:"📊" },
-    { id:"mais",        label:"Mais",      icon:"☰"  },
+    { id:"dashboard",  label:"Início",    icon:"◈" },
+    { id:"extrato",    label:"Extrato",   icon:"≡" },
+    { id:"carteira",   label:"Carteira",  icon:"👜" },
+    { id:"relatorios", label:"Relatórios",icon:"📊" },
+    { id:"mais",       label:"Mais",      icon:"☰"  },
   ];
 
-  const handleNav = (id) => {
-    if (id === "mais") { setMenuOpen(true); return; }
-    setNav(id); setMenuOpen(false);
-  };
+  const handleNav = (id) => { if(id==="mais"){setMenuOpen(true);return;} setNav(id); setMenuOpen(false); };
+
+  const SidebarContent = ({ mobile=false }) => (
+    <>
+      <div style={{ padding: mobile?"24px 20px 18px":"28px 24px 22px", borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
+        <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600 }}>Fontanezzi</div>
+        <div style={{ fontSize:11, color:C.muted, marginTop:3, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
+        <div style={{ marginTop:8, display:"flex", gap:6, alignItems:"center" }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:sbConnected?C.green:C.muted }} />
+          <span style={{ fontSize:10, color:sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+            {sbConnected ? "Supabase conectado" : "Modo demo"}
+          </span>
+        </div>
+        {user && <div style={{ marginTop:6, fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>👤 {user.email}</div>}
+      </div>
+      <nav style={{ padding:"12px", flex:1, overflowY:"auto" }}>
+        {navItems.map(item=>(
+          <button key={item.id} onClick={()=>handleNav(item.id)} style={{
+            display:"flex", alignItems:"center", gap:12, width:"100%",
+            padding: mobile?"13px 16px":"10px 14px",
+            borderRadius:10, border:"none", cursor:"pointer", marginBottom:2, textAlign:"left",
+            background: nav===item.id ? C.gold+"18" : "transparent",
+            color: nav===item.id ? C.goldLight : C.soft,
+            fontFamily:"'DM Sans',sans-serif", fontSize: mobile?15:13, fontWeight:nav===item.id?500:400,
+            borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
+          }}>
+            <span style={{ width:20, textAlign:"center", fontSize:14 }}>{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <div style={{ padding:"0 12px 28px", display:"flex", flexDirection:"column", gap:4 }}>
+        <button onClick={()=>{setConfig(true);setMenuOpen(false);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"10px 14px", borderRadius:10, border:"none", cursor:"pointer", background:"transparent", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
+          ⚙ Configurações
+        </button>
+        <button onClick={handleLogout} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"10px 14px", borderRadius:10, border:"none", cursor:"pointer", background:C.red+"12", color:C.red, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
+          ⇠ Sair
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <>
       <style>{FONTS}</style>
       <style>{`
         *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:${C.bg}; overflow-x:hidden;}
+        body{background:${C.bg};overflow-x:hidden;}
         ::-webkit-scrollbar{width:4px;height:4px;}
         ::-webkit-scrollbar-track{background:${C.surface};}
         ::-webkit-scrollbar-thumb{background:${C.border};border-radius:3px;}
         input[type=date]::-webkit-calendar-picker-indicator,
         input[type=month]::-webkit-calendar-picker-indicator{filter:invert(.5);}
         select option{background:${C.card};color:${C.text};}
+        .ds{display:flex!important;}
+        .dn{display:none!important;}
         @media(max-width:767px){
-          .desktop-sidebar{display:none!important;}
-          .mobile-bottomnav{display:flex!important;}
-          .topbar-users{display:none!important;}
-          .page-pad{padding:16px!important;}
-          .topbar-pad{padding:14px 16px!important;}
+          .desktop-only{display:none!important;}
+          .mobile-only{display:flex!important;}
+          .page-content{padding:14px!important;padding-bottom:80px!important;}
+          .topbar-inner{padding:12px 14px!important;}
         }
         @media(min-width:768px){
-          .mobile-bottomnav{display:none!important;}
-          .mobile-menu-overlay{display:none!important;}
+          .mobile-only{display:none!important;}
+          .page-content{padding:24px 32px!important;}
+          .topbar-inner{padding:18px 32px!important;}
         }
       `}</style>
 
-      {showConfig && <SupabaseConfig onSave={()=>{ setSbConn(true); setConfig(false); showToast("Supabase conectado!"); }} onClose={()=>setConfig(false)} />}
-      {(showForm||editTx) && <TxForm accounts={accounts} initial={editTx} onSave={saveTx} onClose={()=>{ setForm(false); setEditTx(null); }} />}
+      {showConfig && <SupabaseConfig onSave={()=>{setConfig(false);showToast("Supabase configurado!");}} onClose={()=>setConfig(false)} />}
+      {(showForm||editTx) && <TxForm accounts={accounts} initial={editTx} onSave={saveTx} onClose={()=>{setForm(false);setEditTx(null);}} />}
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
-      {/* Mobile drawer menu */}
+      {/* Mobile drawer */}
       {menuOpen && (
-        <div className="mobile-menu-overlay" style={{ position:"fixed", inset:0, zIndex:300, display:"flex" }}>
-          {/* backdrop */}
+        <div className="mobile-only" style={{ position:"fixed", inset:0, zIndex:300 }}>
           <div onClick={()=>setMenuOpen(false)} style={{ position:"absolute", inset:0, background:"#000a" }} />
-          {/* drawer */}
-          <div style={{ position:"relative", width:280, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", height:"100%", zIndex:1 }}>
-            <div style={{ padding:"28px 24px 20px", borderBottom:`1px solid ${C.border}` }}>
-              <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
-              <div style={{ fontSize:24, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600 }}>Fontanezzi</div>
-              <div style={{ fontSize:11, color:C.muted, marginTop:4, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
-              <div style={{ marginTop:10, display:"flex", gap:6, alignItems:"center" }}>
-                <div style={{ width:6, height:6, borderRadius:"50%", background:sbConnected?C.green:C.muted }} />
-                <span style={{ fontSize:10, color:sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
-                  {sbConnected?"Supabase conectado":"Modo demo"}
-                </span>
-              </div>
-            </div>
-            <nav style={{ padding:"12px", flex:1, overflowY:"auto" }}>
-              {navItems.map(item=>(
-                <button key={item.id} onClick={()=>handleNav(item.id)} style={{
-                  display:"flex", alignItems:"center", gap:12, width:"100%", padding:"13px 16px",
-                  borderRadius:12, border:"none", cursor:"pointer", marginBottom:3, textAlign:"left",
-                  background: nav===item.id ? C.gold+"18" : "transparent",
-                  color: nav===item.id ? C.goldLight : C.soft,
-                  fontFamily:"'DM Sans',sans-serif", fontSize:15, fontWeight:nav===item.id?500:400,
-                  borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
-                }}>
-                  <span style={{ width:22, textAlign:"center", fontSize:16 }}>{item.icon}</span>
-                  {item.label}
-                </button>
-              ))}
-            </nav>
-            <div style={{ padding:"0 12px 32px" }}>
-              <button onClick={()=>{setConfig(true);setMenuOpen(false);}} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"13px 16px", borderRadius:12, border:"none", cursor:"pointer", background:"transparent", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:14 }}>
-                ⚙ Configurações
-              </button>
-            </div>
+          <div style={{ position:"relative", width:280, background:C.surface, borderRight:`1px solid ${C.border}`, height:"100%", display:"flex", flexDirection:"column", zIndex:1 }}>
+            <SidebarContent mobile={true} />
           </div>
         </div>
       )}
 
       <div style={{ display:"flex", minHeight:"100vh", background:C.bg }}>
-
-        {/* Desktop Sidebar */}
-        <div className="desktop-sidebar" style={{ width:224, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", flexShrink:0 }}>
-          <div style={{ padding:"28px 24px 22px", borderBottom:`1px solid ${C.border}` }}>
-            <div style={{ fontSize:10, color:C.goldDim, letterSpacing:3, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>Família</div>
-            <div style={{ fontSize:23, fontFamily:"'Cormorant Garamond',serif", color:C.goldLight, fontWeight:600, lineHeight:1 }}>Fontanezzi</div>
-            <div style={{ fontSize:11, color:C.muted, marginTop:4, fontFamily:"'DM Sans',sans-serif" }}>Controle Financeiro</div>
-            <div style={{ marginTop:10, display:"flex", gap:6, alignItems:"center" }}>
-              <div style={{ width:6, height:6, borderRadius:"50%", background:sbConnected?C.green:C.muted }} />
-              <span style={{ fontSize:10, color:sbConnected?C.green:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
-                {sbConnected?"Supabase conectado":"Modo demo"}
-              </span>
-            </div>
-          </div>
-          <nav style={{ padding:"14px 12px", flex:1 }}>
-            {navItems.map(item=>(
-              <button key={item.id} onClick={()=>setNav(item.id)} style={{
-                display:"flex", alignItems:"center", gap:10, width:"100%", padding:"10px 14px",
-                borderRadius:10, border:"none", cursor:"pointer", marginBottom:2, textAlign:"left",
-                background: nav===item.id ? C.gold+"18" : "transparent",
-                color: nav===item.id ? C.goldLight : C.soft,
-                fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:nav===item.id?500:400,
-                borderLeft: nav===item.id ? `2px solid ${C.gold}` : "2px solid transparent",
-              }}>
-                <span style={{ width:20, textAlign:"center", fontSize:14 }}>{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
-          </nav>
-          <div style={{ padding:"0 12px 20px" }}>
-            <button onClick={()=>setConfig(true)} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"10px 14px", borderRadius:10, border:"none", cursor:"pointer", background:"transparent", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:12 }}>
-              ⚙ Configurações
-            </button>
-          </div>
+        {/* Desktop sidebar */}
+        <div className="desktop-only" style={{ width:220, background:C.surface, borderRight:`1px solid ${C.border}`, display:"flex", flexDirection:"column", flexShrink:0 }}>
+          <SidebarContent />
         </div>
 
-        {/* Main content */}
+        {/* Main */}
         <div style={{ flex:1, overflow:"auto", display:"flex", flexDirection:"column", minWidth:0 }}>
-
           {/* Topbar */}
-          <div className="topbar-pad" style={{ padding:"18px 32px", borderBottom:`1px solid ${C.border}`, background:C.surface, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-              {/* Hamburger — mobile only */}
-              <button onClick={()=>setMenuOpen(true)} style={{
-                display:"none", background:"transparent", border:"none", color:C.soft,
-                fontSize:22, cursor:"pointer", padding:"0 4px", lineHeight:1,
-                // shown via CSS below
-              }} className="hamburger">☰</button>
+          <div className="topbar-inner" style={{ borderBottom:`1px solid ${C.border}`, background:C.surface, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <button className="mobile-only" onClick={()=>setMenuOpen(true)} style={{ background:"transparent", border:"none", color:C.soft, fontSize:22, cursor:"pointer", padding:0, lineHeight:1 }}>☰</button>
               <div>
-                <div style={{ fontSize:11, color:C.muted, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>{navItems.find(n=>n.id===nav)?.label}</div>
-                <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:500, marginTop:1 }}>{pageTitle[nav]}</div>
+                <div style={{ fontSize:10, color:C.muted, letterSpacing:2, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif" }}>{navItems.find(n=>n.id===nav)?.label||nav}</div>
+                <div style={{ fontSize:20, fontFamily:"'Cormorant Garamond',serif", color:C.text, fontWeight:500, lineHeight:1.1 }}>{pageTitle[nav]}</div>
               </div>
             </div>
-            <div className="topbar-users" style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", gap:12, alignItems:"center" }}>
+            <div className="desktop-only" style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", gap:10 }}>
               <span>👨 Rodrigo</span><span style={{color:C.border}}>|</span><span>👩 Cláudia</span>
             </div>
           </div>
 
-          {/* Page content */}
-          <div className="page-pad" style={{ padding:"24px 32px", flex:1, paddingBottom:80 }}>
-            {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} />}
-            {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
-            {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
-            {nav==="carteira"     && <Carteira     accounts={accounts} />}
-            {nav==="metas"        && <Metas        transactions={transactions} />}
-            {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} allTxs={transactions} />}
-            {nav==="comprovantes" && <Comprovantes accounts={accounts} onAddTx={saveTx} />}
-            {nav==="contas"       && <ContasView   accounts={accounts} setAccounts={setAccounts} />}
+          {/* Content */}
+          <div className="page-content" style={{ flex:1 }}>
+            {loading ? (
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:200, color:C.muted, fontFamily:"'DM Sans',sans-serif", gap:12 }}>
+                <div style={{ width:16, height:16, borderRadius:"50%", border:`2px solid ${C.gold}`, borderTopColor:"transparent", animation:"spin 1s linear infinite" }} />
+                Carregando dados...
+              </div>
+            ) : <>
+              {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} />}
+              {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
+              {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
+              {nav==="carteira"     && <Carteira     accounts={accounts} />}
+              {nav==="metas"        && <Metas        transactions={transactions} />}
+              {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} allTxs={transactions} />}
+              {nav==="comprovantes" && <Comprovantes accounts={accounts} onAddTx={saveTx} />}
+              {nav==="contas"       && <ContasView   accounts={accounts} setAccounts={setAccounts} />}
+            </>}
           </div>
         </div>
       </div>
 
-      {/* Mobile bottom navigation */}
-      <div className="mobile-bottomnav" style={{
+      {/* Mobile bottom nav */}
+      <div className="mobile-only" style={{
         position:"fixed", bottom:0, left:0, right:0, zIndex:200,
         background:C.surface, borderTop:`1px solid ${C.border}`,
-        display:"none", // shown via CSS
         alignItems:"center", justifyContent:"space-around",
-        padding:"8px 0 max(8px, env(safe-area-inset-bottom))",
+        paddingBottom:"env(safe-area-inset-bottom,8px)", paddingTop:6,
       }}>
         {bottomNav.map(item=>{
-          const active = item.id !== "mais" && nav === item.id;
+          const active = item.id!=="mais" && nav===item.id;
           return (
             <button key={item.id} onClick={()=>handleNav(item.id)} style={{
-              display:"flex", flexDirection:"column", alignItems:"center", gap:3,
-              background:"transparent", border:"none", cursor:"pointer", flex:1, padding:"4px 0",
+              display:"flex", flexDirection:"column", alignItems:"center", gap:2,
+              background:"transparent", border:"none", cursor:"pointer", flex:1, padding:"4px 0 6px",
               color: active ? C.goldLight : C.muted,
             }}>
-              <span style={{ fontSize:20, lineHeight:1 }}>{item.icon}</span>
-              <span style={{ fontSize:10, fontFamily:"'DM Sans',sans-serif", fontWeight: active?500:400 }}>{item.label}</span>
-              {active && <div style={{ width:16, height:2, background:C.gold, borderRadius:2, marginTop:1 }} />}
+              <span style={{ fontSize:19, lineHeight:1 }}>{item.icon}</span>
+              <span style={{ fontSize:9, fontFamily:"'DM Sans',sans-serif", fontWeight:active?600:400 }}>{item.label}</span>
+              {active && <div style={{ width:14, height:2, background:C.gold, borderRadius:2 }} />}
             </button>
           );
         })}
       </div>
-
-      {/* Extra CSS for hamburger visibility */}
-      <style>{`
-        @media(max-width:767px){
-          .hamburger{display:block!important;}
-        }
-      `}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
     </>
   );
 }
