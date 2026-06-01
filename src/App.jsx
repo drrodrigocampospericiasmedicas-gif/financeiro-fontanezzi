@@ -1124,6 +1124,12 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
   const [selAcc, setSelAcc]   = useState(accounts[0]?.id||"");
   const [dupWarnings, setDups] = useState([]);
   const [pdfStatus, setPdfStatus] = useState("");
+  const pdfStatusRef = useRef("");
+
+  const setStatus = (msg) => {
+    pdfStatusRef.current = msg;
+    setPdfStatus(msg);
+  };
 
   const parseCSV = (text) => {
     const lines = text.trim().split("\n").filter(l=>l.trim());
@@ -1138,43 +1144,42 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
 
   // Parse PDF via AI — extract text with pdf.js then send to AI
   const parsePDFwithAI = async (base64) => {
+    let lastMsg = "";
+    const status = (msg) => { lastMsg = msg; setStatus(msg); };
     try {
-      setPdfStatus("📄 Carregando pdf.js...");
+      status("📄 Carregando leitor de PDF...");
+      await new Promise((resolve, reject) => {
+        if (window.pdfjsLib) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+        s.onload = () => {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          resolve();
+        };
+        s.onerror = () => reject(new Error("Falha ao carregar pdf.js do CDN"));
+        document.head.appendChild(s);
+      });
 
-      // Load pdf.js from CDN
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          script.onload = resolve;
-          script.onerror = () => reject(new Error("Falha ao carregar pdf.js"));
-          document.head.appendChild(script);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      }
-
-      setPdfStatus("📄 Extraindo texto do PDF...");
-
-      // Convert base64 to bytes
+      status("📄 Lendo páginas do PDF...");
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
       const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
       let fullText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
         const content = await page.getTextContent();
-        fullText += content.items.map(item => item.str).join(" ") + "\n";
+        fullText += content.items.map(i => i.str).join(" ") + "\n";
       }
 
       if (!fullText.trim()) {
-        setPdfStatus("❌ PDF sem texto — pode ser imagem escaneada");
+        status("❌ PDF sem texto — pode ser imagem escaneada");
         return [];
       }
 
-      setPdfStatus(`🤖 Texto extraído (${fullText.length} chars). IA interpretando...`);
+      status(`🤖 Texto extraído (${fullText.length} chars). Enviando para IA...`);
 
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -1183,21 +1188,19 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
           model: "claude-sonnet-4-20250514",
           max_tokens: 4000,
           messages: [{ role: "user", content:
-`Extrato bancário brasileiro. Extraia transações. Retorne SOMENTE array JSON sem markdown.
+`Extrato bancário brasileiro. Retorne SOMENTE array JSON sem markdown.
 Formato: [{"date":"YYYY-MM-DD","description":"texto","amount":numero}]
-Débitos = negativos. Créditos = positivos. Ignore "SALDO DO DIA" e totais.
-
-TEXTO DO EXTRATO:
-${fullText.slice(0, 8000)}
-
+Débitos/saídas = negativos. Créditos/entradas = positivos.
+Ignore "SALDO DO DIA", totais, cabeçalho, rodapé.
+TEXTO: ${fullText.slice(0, 8000)}
 Responda APENAS o array JSON:`
           }]
         })
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        setPdfStatus("❌ API erro " + res.status + ": " + (err.error?.message || JSON.stringify(err).slice(0,100)));
+        const err = await res.json().catch(()=>({}));
+        status("❌ API HTTP " + res.status + ": " + (err.error?.message || res.statusText));
         return [];
       }
 
@@ -1206,7 +1209,7 @@ Responda APENAS o array JSON:`
       const match = aiText.match(/\[[\s\S]*\]/);
 
       if (!match) {
-        setPdfStatus("❌ IA não retornou JSON. Resposta: " + aiText.slice(0,80));
+        status("❌ IA não retornou JSON. Preview: " + aiText.slice(0,60));
         return [];
       }
 
@@ -1219,11 +1222,11 @@ Responda APENAS o array JSON:`
         accountId: selAcc, category: "outros", keep: true, internalTransfer: false,
       })).filter(t => t.description && t.amount !== 0);
 
-      setPdfStatus(`✅ ${valid.length} transações encontradas!`);
+      status(`✅ ${valid.length} transações encontradas!`);
       return valid;
 
     } catch (e) {
-      setPdfStatus("❌ Erro: " + e.message);
+      status("❌ " + (e.message || String(e)));
       return [];
     }
   };
@@ -1249,7 +1252,7 @@ Responda APENAS o array JSON:`
       });
       parsed = await parsePDFwithAI(b64);
       if (!parsed.length) {
-        alert("Erro ao processar PDF:\n\n" + pdfStatus);
+        alert("Erro ao processar PDF:\n\n" + pdfStatusRef.current);
         setStep("idle"); return;
       }
     } else if (file.name.match(/\.ofx$/i)) {
