@@ -1,5 +1,37 @@
 import { useState, useEffect, useRef } from "react";
 
+// ─── PDF.JS LOADER ────────────────────────────────────────────────────────────
+async function extractPDFText(base64) {
+  // Load pdf.js from CDN if not already loaded
+  if (!window.pdfjsLib) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  // Convert base64 to Uint8Array
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  // Load and extract text from all pages
+  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join(" ");
+    fullText += pageText + "\n";
+  }
+  return fullText;
+}
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
   bg:        "#0d0f14",
@@ -1104,62 +1136,57 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
     }).filter(Boolean);
   };
 
-  // Parse PDF via AI — correct document format for Claude API
-  const parsePDFwithAI = async (base64, mime) => {
-    setPdfStatus("🤖 IA lendo o extrato PDF...");
+  // Parse PDF via AI — extract text with pdf.js then send to AI
+  const parsePDFwithAI = async (base64) => {
+    try {
+      setPdfStatus("📄 Extraindo texto do PDF...");
+      const pdfText = await extractPDFText(base64);
 
-    const prompt = `Você recebeu um extrato bancário brasileiro em PDF. Pode ser Itaú, Nubank, PicPay ou outro banco.
+      if (!pdfText.trim()) {
+        setPdfStatus("❌ PDF sem texto legível (pode ser imagem escaneada)");
+        return [];
+      }
 
-Extraia TODAS as transações individuais e retorne SOMENTE um array JSON válido, sem markdown, sem texto antes ou depois.
+      setPdfStatus("🤖 IA interpretando o extrato...");
 
-Cada objeto deve ter:
-{"date":"YYYY-MM-DD","description":"texto","amount":valor_numerico}
+      const prompt = `Você recebeu o texto extraído de um extrato bancário brasileiro (Itaú, Nubank, PicPay ou outro).
+
+Texto do extrato:
+${pdfText.slice(0, 8000)}
+
+Extraia TODAS as transações individuais e retorne SOMENTE um array JSON, sem markdown, sem texto antes ou depois.
+
+Formato: [{"date":"YYYY-MM-DD","description":"texto","amount":valor_numerico}, ...]
 
 Regras:
-- Débitos, saídas, pagamentos, compras, tarifas = amount NEGATIVO
-- Créditos, entradas, Pix recebido, salário, rendimento = amount POSITIVO
+- Débitos, saídas, pagamentos, compras, tarifas, PIX enviado = amount NEGATIVO
+- Créditos, entradas, PIX recebido, salário, rendimento = amount POSITIVO
 - Converta datas DD/MM/AAAA para YYYY-MM-DD
-- Ignore linhas "SALDO DO DIA", totais, cabeçalho e rodapé
-- Inclua estornos (EST...) pois podem ser relevantes
+- Ignore linhas "SALDO DO DIA", totais, cabeçalho, rodapé, aviso legal
 - Retorne [] se não encontrar transações
 
-Responda APENAS o array JSON começando com [ e terminando com ]:`;
+Responda APENAS o array JSON:`;
 
-    try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 4000,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: base64
-                }
-              },
-              { type: "text", text: prompt }
-            ]
-          }]
+          messages: [{ role: "user", content: prompt }]
         })
       });
 
       const data = await res.json();
-
       if (!res.ok) {
-        setPdfStatus("❌ Erro API: " + (data.error?.message || JSON.stringify(data)));
+        setPdfStatus("❌ Erro API: " + (data.error?.message || "desconhecido"));
         return [];
       }
 
       const text = data.content?.[0]?.text || "";
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) {
-        setPdfStatus("❌ IA não retornou JSON válido");
+        setPdfStatus("❌ IA não retornou dados estruturados");
         return [];
       }
 
@@ -1205,9 +1232,9 @@ Responda APENAS o array JSON começando com [ e terminando com ]:`;
         r.onerror = rej;
         r.readAsDataURL(file);
       });
-      parsed = await parsePDFwithAI(b64, "application/pdf");
+      parsed = await parsePDFwithAI(b64);
       if (!parsed.length) {
-        alert(`Não foi possível extrair transações do PDF.\n\n${pdfStatus}\n\nDica: No app Itaú, exporte como CSV em vez de PDF se disponível.`);
+        alert(`Não foi possível extrair transações do PDF.\n\n${pdfStatus}`);
         setStep("idle"); return;
       }
     } else if (file.name.match(/\.ofx$/i)) {
