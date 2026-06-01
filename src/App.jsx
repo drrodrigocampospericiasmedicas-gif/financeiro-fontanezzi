@@ -2472,9 +2472,8 @@ export default function App() {
   // Load data from Supabase when user logs in
   useEffect(() => {
     if (!user || !sbConnected) {
-      // not logged in or no Supabase — use demo data
       if (!sbConnected) setTxs(MOCK_TXS);
-      else setTxs([]); // logged in but loading
+      else setTxs([]);
       return;
     }
     setLoading(true);
@@ -2482,14 +2481,25 @@ export default function App() {
       dbFrom("transactions").then(t => t?.select("*")),
       dbFrom("accounts").then(t => t?.select("*")),
     ]).then(([txRes, accRes]) => {
-      // Use real data — empty arrays mean fresh account (no demo data)
-      setTxs(txRes?.data || []);
+      // Map DB snake_case → app camelCase
+      const txs = (txRes?.data || []).map(t => ({
+        id: t.id,
+        accountId: t.account_id || t.accountId,
+        date: t.date,
+        description: t.description,
+        amount: parseFloat(t.amount),
+        category: t.category || "outros",
+        notes: t.notes || "",
+        internalTransfer: t.internal_transfer || t.internalTransfer || false,
+      }));
+      setTxs(txs);
       if (accRes?.data?.length) {
-        setAccounts(accRes.data);
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accRes.data));
-      } else {
-        // No accounts in DB yet — keep local ones but don't show demo transactions
-        setTxs([]);
+        const accs = accRes.data.map(a => ({
+          ...a,
+          balance: parseFloat(a.balance) || 0,
+        }));
+        setAccounts(accs);
+        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accs));
       }
       setLoading(false);
     }).catch(() => { setTxs([]); setLoading(false); });
@@ -2510,8 +2520,19 @@ export default function App() {
     setTxs(ts => { const i = ts.findIndex(t=>t.id===tx.id); return i>=0 ? ts.map((t,idx)=>idx===i?tx:t) : [tx,...ts]; });
     const tbl = await dbFrom("transactions");
     if (tbl) {
+      const dbTx = {
+        id: tx.id,
+        account_id: tx.accountId,
+        date: tx.date,
+        description: tx.description,
+        amount: tx.amount,
+        category: tx.category,
+        notes: tx.notes || "",
+        internal_transfer: tx.internalTransfer || false,
+      };
       const exists = transactions.find(t=>t.id===tx.id);
-      if (exists) await tbl.update(tx, {id:tx.id}); else await tbl.insert(tx);
+      if (exists) await tbl.update(dbTx, {id:tx.id});
+      else await tbl.insert(dbTx);
     }
     setForm(false); setEditTx(null);
     showToast("Lançamento salvo!");
@@ -2524,9 +2545,32 @@ export default function App() {
     showToast("Removido","warn");
   };
 
-  const importTxs = (rows, accountId) => {
+  const importTxs = async (rows, accountId) => {
+    // Update local state immediately
     setTxs(ts => [...rows, ...ts]);
-    // Recalculate balance for the imported account
+    showToast(`Salvando ${rows.length} lançamentos...`, "ok");
+
+    // Save ALL imported transactions to Supabase
+    const tbl = await dbFrom("transactions");
+    if (tbl) {
+      // Insert in batches to avoid timeout
+      const batchSize = 20;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        await Promise.all(batch.map(tx => tbl.insert({
+          id: tx.id,
+          account_id: tx.accountId,
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          category: tx.category,
+          notes: tx.notes || "",
+          internal_transfer: tx.internalTransfer || false,
+        })));
+      }
+    }
+
+    // Recalculate and save balance for the imported account
     if (accountId) {
       setAccounts(accs => {
         const updated = accs.map(a => {
@@ -2534,7 +2578,6 @@ export default function App() {
           const allTxsForAccount = [...transactions, ...rows].filter(t => t.accountId === accountId && !t.internalTransfer);
           const newBalance = allTxsForAccount.reduce((s, t) => s + t.amount, 0);
           const updatedAcc = { ...a, balance: Math.round(newBalance * 100) / 100 };
-          // Persist to Supabase
           dbFrom("accounts").then(tbl => tbl?.update({ balance: updatedAcc.balance }, { id: accountId }));
           return updatedAcc;
         });
@@ -2542,7 +2585,8 @@ export default function App() {
         return updated;
       });
     }
-    showToast(`${rows.length} lançamentos importados!`);
+
+    showToast(`✅ ${rows.length} lançamentos salvos!`);
   };
 
   // Show login screen if not authenticated
