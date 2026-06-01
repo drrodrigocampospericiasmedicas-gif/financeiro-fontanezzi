@@ -892,7 +892,7 @@ const Dashboard = ({ transactions, accounts, onNavigate }) => {
         </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1.2fr 0.8fr", gap:18 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))", gap:18 }}>
         {/* Categorias + metas */}
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
@@ -1757,7 +1757,7 @@ const Carteira = ({ accounts }) => {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
 
         {/* ── CONTAS BANCÁRIAS ─────────────────────────────────────── */}
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, display: "flex", flexDirection: "column", gap: 0 }}>
@@ -2090,8 +2090,9 @@ export default function App() {
   // Load data from Supabase when user logs in
   useEffect(() => {
     if (!user || !sbConnected) {
-      // not logged in — use demo data
-      setTxs(MOCK_TXS);
+      // not logged in or no Supabase — use demo data
+      if (!sbConnected) setTxs(MOCK_TXS);
+      else setTxs([]); // logged in but loading
       return;
     }
     setLoading(true);
@@ -2099,11 +2100,14 @@ export default function App() {
       dbFrom("transactions").then(t => t?.select("*")),
       dbFrom("accounts").then(t => t?.select("*")),
     ]).then(([txRes, accRes]) => {
-      if (txRes?.data?.length)  setTxs(txRes.data);
-      else setTxs([]); // empty = real account, no demo data
+      // Use real data — empty arrays mean fresh account (no demo data)
+      setTxs(txRes?.data || []);
       if (accRes?.data?.length) {
         setAccounts(accRes.data);
         localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accRes.data));
+      } else {
+        // No accounts in DB yet — keep local ones but don't show demo transactions
+        setTxs([]);
       }
       setLoading(false);
     }).catch(() => { setTxs([]); setLoading(false); });
