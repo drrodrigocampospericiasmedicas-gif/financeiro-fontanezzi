@@ -1091,6 +1091,7 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
   const [classifying, setCls] = useState(false);
   const [selAcc, setSelAcc]   = useState(accounts[0]?.id||"");
   const [dupWarnings, setDups] = useState([]);
+  const [pdfStatus, setPdfStatus] = useState("");
 
   const parseCSV = (text) => {
     const lines = text.trim().split("\n").filter(l=>l.trim());
@@ -1103,15 +1104,93 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
     }).filter(Boolean);
   };
 
+  // Parse PDF via AI — sends base64 PDF and extracts transactions
+  const parsePDFwithAI = async (base64, mime) => {
+    setPdfStatus("🤖 IA lendo o extrato PDF...");
+    const prompt = `Você recebeu um extrato bancário em PDF de um banco brasileiro (pode ser Itaú, Nubank, PicPay ou outro).
+
+Extraia TODAS as transações do extrato e retorne SOMENTE um array JSON válido, sem markdown, sem explicação, sem texto antes ou depois.
+
+Cada objeto deve ter exatamente estes campos:
+- "date": data no formato "YYYY-MM-DD"
+- "description": descrição da transação (string)
+- "amount": valor numérico (negativo para débitos/saídas, positivo para créditos/entradas)
+
+Regras importantes:
+- Débitos, saídas, pagamentos, compras = amount NEGATIVO
+- Créditos, entradas, salários, Pix recebido = amount POSITIVO
+- Se o ano não estiver explícito, use o ano atual (${new Date().getFullYear()})
+- Ignore saldos, totais, cabeçalhos — apenas transações individuais
+- Se houver "Saldo anterior" ou "Saldo final", ignore
+- Retorne [] se não encontrar transações
+
+Responda SOMENTE o array JSON:`;
+
+    try {
+      const text = await callClaude(prompt, base64, mime);
+      const clean = text.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      if (!Array.isArray(parsed)) return [];
+      setPdfStatus(`✅ ${parsed.length} transações encontradas`);
+      return parsed.map(t => ({
+        id: "imp_"+Math.random().toString(36).slice(2),
+        date: t.date || fmt(TODAY),
+        description: String(t.description||"").trim(),
+        amount: parseFloat(t.amount)||0,
+        accountId: selAcc,
+        category: "outros",
+        keep: true,
+        internalTransfer: false,
+      })).filter(t => t.description && t.amount !== 0);
+    } catch(e) {
+      setPdfStatus("❌ Não foi possível extrair transações do PDF");
+      return [];
+    }
+  };
+
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setStep("parsing");
-    const text = await file.text();
+    setPdfStatus("");
     let parsed = [];
-    if (file.name.match(/\.(csv|txt)$/i)) parsed = parseCSV(text);
-    else { alert("Formato não suportado. Use CSV por enquanto."); setStep("idle"); return; }
-    if (!parsed.length) { alert("Não foi possível interpretar o arquivo."); setStep("idle"); return; }
+
+    if (file.name.match(/\.(csv|txt)$/i)) {
+      const text = await file.text();
+      parsed = parseCSV(text);
+      if (!parsed.length) { alert("Não foi possível interpretar o CSV. Verifique o formato."); setStep("idle"); return; }
+    } else if (file.name.match(/\.pdf$/i)) {
+      // Convert to base64 and send to AI
+      const b64 = await new Promise((res,rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      parsed = await parsePDFwithAI(b64, "application/pdf");
+      if (!parsed.length) {
+        alert("Não foi possível extrair transações do PDF. Tente exportar o extrato como CSV no app do banco.");
+        setStep("idle"); return;
+      }
+    } else if (file.name.match(/\.ofx$/i)) {
+      // Basic OFX parser
+      const text = await file.text();
+      const txMatches = [...text.matchAll(/<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi)];
+      parsed = txMatches.map(m => {
+        const block = m[1];
+        const get = (tag) => { const match = block.match(new RegExp(`<${tag}>([^<\\n]+)`, 'i')); return match?.[1]?.trim()||""; };
+        const dateRaw = get("DTPOSTED").slice(0,8);
+        const date = dateRaw ? `${dateRaw.slice(0,4)}-${dateRaw.slice(4,6)}-${dateRaw.slice(6,8)}` : fmt(TODAY);
+        const amount = parseFloat(get("TRNAMT").replace(",",".")) || 0;
+        const desc = get("MEMO") || get("NAME") || "Transação";
+        if (!amount) return null;
+        return { id:"imp_"+Math.random().toString(36).slice(2), date, description:desc, amount, accountId:selAcc, category:"outros", keep:true, internalTransfer:false };
+      }).filter(Boolean);
+      if (!parsed.length) { alert("Não foi possível interpretar o OFX."); setStep("idle"); return; }
+    } else {
+      alert("Formato não suportado.\nFormatos aceitos: PDF, CSV, OFX");
+      setStep("idle"); return;
+    }
 
     // detect internal transfers
     const withInternal = parsed.map(r => ({
@@ -1120,22 +1199,17 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
       category: detectInternalTransfer(r.description, accounts) ? "transferencia" : "outros"
     }));
 
-    // detect duplicates against existing txs
+    // detect duplicates
     const dups = withInternal.filter(r =>
       allTxs.some(t => t.accountId===r.accountId && t.date===r.date && Math.abs(t.amount)===Math.abs(r.amount) && t.description.toLowerCase()===r.description.toLowerCase())
     );
     setDups(dups.map(d=>d.id));
-
-    // auto-uncheck internal transfers that have a pair already
-    const deduped = withInternal.map(r => ({
-      ...r,
-      keep: !dups.find(d=>d.id===r.id)
-    }));
+    const deduped = withInternal.map(r => ({ ...r, keep: !dups.find(d=>d.id===r.id) }));
 
     setRows(deduped);
     setStep("review");
 
-    // Classify non-internal with AI
+    // Classify with AI
     setCls(true);
     const updated = await Promise.all(deduped.map(async r => {
       if (r.internalTransfer) return r;
@@ -1159,10 +1233,10 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:28 }}>
         <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:6 }}>Importar Extrato Bancário</div>
         <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>
-          Upload do arquivo de extrato. A IA classifica automaticamente cada linha.
+          Upload do extrato. A IA classifica automaticamente cada linha.
         </div>
         <div style={{ fontSize:12, color:C.goldDim, fontFamily:"'DM Sans',sans-serif", marginBottom:22 }}>
-          ✓ Transferências internas detectadas automaticamente · ✓ Duplicatas marcadas · Formatos: CSV (OFX/PDF em breve)
+          ✓ PDF (Itaú, Nubank, PicPay) · ✓ CSV · ✓ OFX · ✓ Transferências internas detectadas · ✓ Duplicatas marcadas
         </div>
 
         {step==="idle" && (
@@ -1175,12 +1249,19 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
             </div>
             <label style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.gold, color:C.bg, borderRadius:8, padding:"10px 22px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
               📁 Selecionar arquivo
-              <input type="file" accept=".csv,.txt,.ofx" style={{ display:"none" }} onChange={handleFile} />
+              <input type="file" accept=".csv,.txt,.ofx,.pdf" style={{ display:"none" }} onChange={handleFile} />
             </label>
           </div>
         )}
 
-        {step==="parsing" && <div style={{ color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>⏳ Processando...</div>}
+        {step==="parsing" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, color:C.blue, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
+              <div style={{ width:16, height:16, borderRadius:"50%", border:`2px solid ${C.blue}`, borderTopColor:"transparent", animation:"spin 1s linear infinite", flexShrink:0 }} />
+              {pdfStatus || "Processando arquivo..."}
+            </div>
+          </div>
+        )}
 
         {step==="done" && (
           <div style={{ display:"flex", gap:14, alignItems:"center" }}>
