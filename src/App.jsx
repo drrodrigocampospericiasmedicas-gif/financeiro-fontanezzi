@@ -1107,43 +1107,83 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
   // Parse PDF via AI — sends base64 PDF and extracts transactions
   const parsePDFwithAI = async (base64, mime) => {
     setPdfStatus("🤖 IA lendo o extrato PDF...");
-    const prompt = `Você recebeu um extrato bancário em PDF de um banco brasileiro (pode ser Itaú, Nubank, PicPay ou outro).
+    const prompt = `Você recebeu um extrato bancário brasileiro em PDF. Pode ser do Itaú, Nubank, PicPay ou outro banco.
 
-Extraia TODAS as transações do extrato e retorne SOMENTE um array JSON válido, sem markdown, sem explicação, sem texto antes ou depois.
+O extrato do app Itaú geralmente tem colunas como: Data | Histórico/Descrição | Valor | Saldo
+O Nubank tem: Data | Descrição | Valor
+O PicPay tem: Data | Descrição | Tipo | Valor
 
-Cada objeto deve ter exatamente estes campos:
-- "date": data no formato "YYYY-MM-DD"
-- "description": descrição da transação (string)
-- "amount": valor numérico (negativo para débitos/saídas, positivo para créditos/entradas)
+Extraia TODAS as transações individuais e retorne SOMENTE um array JSON, sem nenhum texto antes ou depois, sem markdown, sem bloco de código.
 
-Regras importantes:
-- Débitos, saídas, pagamentos, compras = amount NEGATIVO
-- Créditos, entradas, salários, Pix recebido = amount POSITIVO
-- Se o ano não estiver explícito, use o ano atual (${new Date().getFullYear()})
-- Ignore saldos, totais, cabeçalhos — apenas transações individuais
-- Se houver "Saldo anterior" ou "Saldo final", ignore
-- Retorne [] se não encontrar transações
+Formato de cada objeto:
+{"date":"YYYY-MM-DD","description":"texto da transação","amount":valor_numerico}
 
-Responda SOMENTE o array JSON:`;
+Regras:
+- Débitos, saídas, compras, pagamentos, tarifas = amount NEGATIVO (ex: -150.00)
+- Créditos, entradas, Pix recebido, salário, rendimento = amount POSITIVO (ex: 3500.00)  
+- Converta datas brasileiras DD/MM/AAAA para YYYY-MM-DD
+- Se o ano não estiver explícito, use ${new Date().getFullYear()}
+- Ignore linhas de saldo, cabeçalho, rodapé, totais
+- Retorne [] se não encontrar nenhuma transação
+
+Responda APENAS o array JSON, começando com [ e terminando com ]:`;
 
     try {
-      const text = await callClaude(prompt, base64, mime);
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
-      if (!Array.isArray(parsed)) return [];
-      setPdfStatus(`✅ ${parsed.length} transações encontradas`);
-      return parsed.map(t => ({
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "document", source: { type: "base64", media_type: mime, data: base64 } },
+              { type: "text", text: prompt }
+            ]
+          }]
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error("API error:", data);
+        setPdfStatus("❌ Erro na API: " + (data.error?.message || "desconhecido"));
+        return [];
+      }
+
+      const text = data.content?.[0]?.text || "";
+      console.log("AI response:", text.slice(0, 200));
+
+      // Extract JSON array from response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        setPdfStatus("❌ IA não retornou dados estruturados");
+        console.error("No JSON array found in:", text);
+        return [];
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed)) { setPdfStatus("❌ Formato inesperado"); return []; }
+
+      const valid = parsed.map(t => ({
         id: "imp_"+Math.random().toString(36).slice(2),
-        date: t.date || fmt(TODAY),
-        description: String(t.description||"").trim(),
-        amount: parseFloat(t.amount)||0,
+        date: String(t.date||"").replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1") || fmt(TODAY),
+        description: String(t.description||t.memo||t.historico||"").trim(),
+        amount: parseFloat(String(t.amount||t.valor||0).replace(",","."))||0,
         accountId: selAcc,
         category: "outros",
         keep: true,
         internalTransfer: false,
       })).filter(t => t.description && t.amount !== 0);
+
+      setPdfStatus(`✅ ${valid.length} transações encontradas`);
+      return valid;
+
     } catch(e) {
-      setPdfStatus("❌ Não foi possível extrair transações do PDF");
+      console.error("PDF parse error:", e);
+      setPdfStatus("❌ Erro ao processar: " + e.message);
       return [];
     }
   };
@@ -1169,7 +1209,7 @@ Responda SOMENTE o array JSON:`;
       });
       parsed = await parsePDFwithAI(b64, "application/pdf");
       if (!parsed.length) {
-        alert("Não foi possível extrair transações do PDF. Tente exportar o extrato como CSV no app do banco.");
+        alert(`Não foi possível extrair transações do PDF.\n\n${pdfStatus}\n\nDica: No app Itaú, exporte como CSV em vez de PDF se disponível.`);
         setStep("idle"); return;
       }
     } else if (file.name.match(/\.ofx$/i)) {
