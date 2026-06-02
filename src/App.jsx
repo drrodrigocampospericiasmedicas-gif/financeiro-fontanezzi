@@ -56,6 +56,9 @@ const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+G
 // ─── CATEGORIES ───────────────────────────────────────────────────────────────
 const DEFAULT_CATEGORIES = [
   { id: "alimentacao",   label: "Alimentação",   icon: "🍽️", color: "#e08c4c" },
+  { id: "supermercado",  label: "Supermercado",  icon: "🛒",  color: "#f39c12" },
+  { id: "restaurante",   label: "Restaurante",   icon: "🍴",  color: "#e67e22" },
+  { id: "farmacia",      label: "Farmácia",      icon: "💊",  color: "#2ecc71" },
   { id: "transporte",    label: "Transporte",    icon: "🚗",  color: "#4c8ec9" },
   { id: "saude",         label: "Saúde",         icon: "🏥",  color: "#4caf82" },
   { id: "educacao",      label: "Educação",      icon: "📚",  color: "#9b59b6" },
@@ -63,6 +66,9 @@ const DEFAULT_CATEGORIES = [
   { id: "moradia",       label: "Moradia",       icon: "🏠",  color: "#c9a84c" },
   { id: "vestuario",     label: "Vestuário",     icon: "👔",  color: "#5cc9e0" },
   { id: "financeiro",    label: "Financeiro",    icon: "💳",  color: "#e05c5c" },
+  { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
+  { id: "bela",          label: "Bela",          icon: "💅",  color: "#fd79a8" },
+  { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
   { id: "transferencia", label: "Transferência", icon: "🔄",  color: "#6b6f7d" },
   { id: "receita",       label: "Receita",       icon: "💰",  color: "#4caf82" },
   { id: "outros",        label: "Outros",        icon: "📦",  color: "#9a98a0" },
@@ -289,7 +295,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
 
 async function classifyTx(description) {
   const text = await callClaude(
-    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, transferencia, receita, outros`
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, transferencia, receita, outros\n\nDicas: supermercado=mercado/carrefour/extra, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
   );
   const id = text.trim().toLowerCase();
   return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
@@ -1080,37 +1086,65 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
         </div>
       </div>
 
-      {/* Tabela */}
+      {/* Lista de transações — cards no mobile, tabela no desktop */}
       <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"75px 1fr 130px 120px 105px 70px" }}>
+        {/* Header desktop */}
+        <div className="desktop-only" style={{ display:"grid", gridTemplateColumns:"75px 1fr 130px 120px 105px 70px", background:C.surface, borderBottom:`1px solid ${C.border}` }}>
           {["Data","Descrição","Conta","Categoria","Valor",""].map((h,i)=>(
-            <div key={i} style={{ padding:"11px 14px", fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", letterSpacing:1, textTransform:"uppercase", borderBottom:`1px solid ${C.border}`, background:C.surface }}>{h}</div>
+            <div key={i} style={{ padding:"11px 14px", fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", letterSpacing:1, textTransform:"uppercase" }}>{h}</div>
           ))}
-          {filtered.length===0 && (
-            <div style={{ gridColumn:"1/-1", padding:"40px", textAlign:"center", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>Nenhuma movimentação encontrada</div>
-          )}
-          {filtered.map((t,i)=>{
-            const cat = catOf(t.category);
-            const acc = accounts.find(a=>a.id===t.accountId);
-            return [
-              i>0 && <div key={`d${t.id}`} style={{ gridColumn:"1/-1", height:1, background:C.border }} />,
-              <div key={`a${t.id}`} style={{ padding:"11px 14px", fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", display:"flex", alignItems:"center" }}>{fdate(t.date)}</div>,
-              <div key={`b${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:7 }}>
-                {t.internalTransfer && <span style={{ fontSize:10, background:C.blue+"22", color:C.blue, border:`1px solid ${C.blue}44`, borderRadius:4, padding:"1px 5px" }}>INT</span>}
-                <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:220 }}>{t.description}</span>
-              </div>,
-              <div key={`c${t.id}`} style={{ padding:"11px 14px", fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", display:"flex", alignItems:"center" }}>{acc?.name||"—"}</div>,
-              <div key={`e${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center" }}><Chip icon={cat.icon} label={cat.label} color={cat.color} /></div>,
-              <div key={`f${t.id}`} style={{ padding:"11px 14px", display:"flex", alignItems:"center", fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text }}>
-                {t.amount>0?"+":""}{brl(t.amount)}
-              </div>,
-              <div key={`g${t.id}`} style={{ padding:"11px 6px", display:"flex", alignItems:"center", gap:2 }}>
-                <button onClick={()=>onEdit(t)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px", borderRadius:5 }} title="Editar">✏️</button>
-                <button onClick={()=>onDelete(t.id)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px", borderRadius:5 }} title="Excluir">🗑️</button>
-              </div>
-            ];
-          })}
         </div>
+        {filtered.length===0 && (
+          <div style={{ padding:"40px", textAlign:"center", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>Nenhuma movimentação encontrada</div>
+        )}
+        {filtered.map((t,i)=>{
+          const cat = catOf(t.category);
+          const acc = accounts.find(a=>a.id===t.accountId);
+          return (
+            <div key={t.id}>
+              {i>0 && <div style={{ height:1, background:C.border }} />}
+              {/* Mobile card */}
+              <div className="mobile-only" style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12 }}>
+                <div style={{ fontSize:22, flexShrink:0 }}>{cat.icon}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                    {t.internalTransfer && <span style={{ fontSize:10, background:C.blue+"22", color:C.blue, borderRadius:4, padding:"1px 5px", marginRight:5 }}>INT</span>}
+                    {t.description}
+                  </div>
+                  <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:2 }}>
+                    {fdate(t.date)} · {acc?.name||"—"} · <span style={{color:cat.color}}>{cat.label}</span>
+                  </div>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
+                  <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text }}>
+                    {t.amount>0?"+":""}{brl(t.amount)}
+                  </div>
+                  <div style={{ display:"flex", gap:2 }}>
+                    <button onClick={()=>onEdit(t)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:12, padding:"2px 4px" }}>✏️</button>
+                    <button onClick={()=>onDelete(t.id)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:12, padding:"2px 4px" }}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+              {/* Desktop row */}
+              <div className="desktop-only" style={{ display:"grid", gridTemplateColumns:"75px 1fr 130px 120px 105px 70px", alignItems:"center" }}>
+                <div style={{ padding:"11px 14px", fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{fdate(t.date)}</div>
+                <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:7 }}>
+                  {t.internalTransfer && <span style={{ fontSize:10, background:C.blue+"22", color:C.blue, border:`1px solid ${C.blue}44`, borderRadius:4, padding:"1px 5px" }}>INT</span>}
+                  <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.description}</span>
+                </div>
+                <div style={{ padding:"11px 14px", fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{acc?.name||"—"}</div>
+                <div style={{ padding:"11px 14px" }}><Chip icon={cat.icon} label={cat.label} color={cat.color} /></div>
+                <div style={{ padding:"11px 14px", fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text }}>
+                  {t.amount>0?"+":""}{brl(t.amount)}
+                </div>
+                <div style={{ padding:"11px 6px", display:"flex", alignItems:"center", gap:2 }}>
+                  <button onClick={()=>onEdit(t)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px" }}>✏️</button>
+                  <button onClick={()=>onDelete(t.id)} style={{ background:"transparent", border:"none", color:C.muted, cursor:"pointer", fontSize:14, padding:"4px 5px" }}>🗑️</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2546,17 +2580,34 @@ export default function App() {
   };
 
   const importTxs = async (rows, accountId) => {
-    // Update local state immediately
-    setTxs(ts => [...rows, ...ts]);
-    showToast(`Salvando ${rows.length} lançamentos...`, "ok");
+    // Deduplicate against existing transactions before saving
+    const deduped = rows.filter(r => {
+      return !transactions.some(t =>
+        t.accountId === r.accountId &&
+        t.date === r.date &&
+        Math.abs(parseFloat(t.amount)) === Math.abs(parseFloat(r.amount)) &&
+        t.description.toLowerCase().trim() === r.description.toLowerCase().trim()
+      );
+    });
 
-    // Save ALL imported transactions to Supabase
+    const skipped = rows.length - deduped.length;
+
+    if (deduped.length === 0) {
+      showToast(`Todas as ${rows.length} transações já existem — nada importado.`, "warn");
+      return;
+    }
+
+    // Update local state immediately
+    setTxs(ts => [...deduped, ...ts]);
+    if (skipped > 0) showToast(`Salvando ${deduped.length} novos lançamentos (${skipped} duplicados ignorados)...`);
+    else showToast(`Salvando ${deduped.length} lançamentos...`);
+
+    // Save to Supabase
     const tbl = await dbFrom("transactions");
     if (tbl) {
-      // Insert in batches to avoid timeout
       const batchSize = 20;
-      for (let i = 0; i < rows.length; i += batchSize) {
-        const batch = rows.slice(i, i + batchSize);
+      for (let i = 0; i < deduped.length; i += batchSize) {
+        const batch = deduped.slice(i, i + batchSize);
         await Promise.all(batch.map(tx => tbl.insert({
           id: tx.id,
           account_id: tx.accountId,
@@ -2575,8 +2626,8 @@ export default function App() {
       setAccounts(accs => {
         const updated = accs.map(a => {
           if (a.id !== accountId) return a;
-          const allTxsForAccount = [...transactions, ...rows].filter(t => t.accountId === accountId && !t.internalTransfer);
-          const newBalance = allTxsForAccount.reduce((s, t) => s + t.amount, 0);
+          const allTxsForAccount = [...transactions, ...deduped].filter(t => t.accountId === accountId && !t.internalTransfer);
+          const newBalance = allTxsForAccount.reduce((s, t) => s + parseFloat(t.amount), 0);
           const updatedAcc = { ...a, balance: Math.round(newBalance * 100) / 100 };
           dbFrom("accounts").then(tbl => tbl?.update({ balance: updatedAcc.balance }, { id: accountId }));
           return updatedAcc;
@@ -2586,7 +2637,7 @@ export default function App() {
       });
     }
 
-    showToast(`✅ ${rows.length} lançamentos salvos!`);
+    showToast(`✅ ${deduped.length} lançamentos salvos!${skipped > 0 ? ` (${skipped} duplicados ignorados)` : ""}`);
   };
 
   // Show login screen if not authenticated
