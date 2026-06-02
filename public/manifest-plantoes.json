@@ -1,10 +1,10 @@
 {
-  "id": "/plantoes.html",
+  "id": "plantoes-fontanezzi",
   "name": "Plant\u00f5es \u00b7 Dr. Fontanezzi",
   "short_name": "Plant\u00f5es",
   "description": "Controle de plant\u00f5es m\u00e9dicos \u00b7 Dr. Rodrigo Fontanezzi",
   "start_url": "/plantoes.html",
-  "scope": "/plantoes.html",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0c10",
   "theme_color": "#3b82f6",
