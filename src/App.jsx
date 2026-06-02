@@ -69,6 +69,8 @@ const DEFAULT_CATEGORIES = [
   { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
   { id: "bela",          label: "Bela",          icon: "💅",  color: "#fd79a8" },
   { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
+  { id: "divida",        label: "Dívida",        icon: "📋",  color: "#e17055" },
+  { id: "taxas",         label: "Taxas Bancárias",icon: "🏛️", color: "#636e72" },
   { id: "transferencia", label: "Transferência", icon: "🔄",  color: "#6b6f7d" },
   { id: "receita",       label: "Receita",       icon: "💰",  color: "#4caf82" },
   { id: "outros",        label: "Outros",        icon: "📦",  color: "#9a98a0" },
@@ -295,7 +297,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
 
 async function classifyTx(description) {
   const text = await callClaude(
-    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, transferencia, receita, outros\n\nDicas: supermercado=mercado/carrefour/extra, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, transferencia, receita, outros\n\nDicas: supermercado=mercado/carrefour/extra, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário, divida=parcela/financiamento/empréstimo/boleto de dívida, taxas=tarifa bancária/IOF/taxa/pacote banco\n\nResponda apenas o id:`
   );
   const id = text.trim().toLowerCase();
   return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
