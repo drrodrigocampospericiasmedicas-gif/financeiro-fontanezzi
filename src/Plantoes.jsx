@@ -167,17 +167,17 @@ const BankSettings = ({ onClose }) => {
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
 function generatePDF(plantoes, month, year) {
   const bank = loadBank();
+  const parseD = (s) => { try { const [y,m,d]=String(s).split("T")[0].split("-").map(Number); return new Date(y,m-1,d); } catch { return new Date(); } };
   const monthPlantoes = plantoes.filter(p => {
-    const d = new Date(p.data + "T12:00:00");
-    return d.getMonth() === month && d.getFullYear() === year;
-  }).sort((a,b) => a.data.localeCompare(b.data));
+    try { const d=parseD(p.data); return d.getMonth()===month && d.getFullYear()===year; } catch { return false; }
+  }).sort((a,b) => String(a.data).localeCompare(String(b.data)));
 
   const totalPlantao = monthPlantoes.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
   const totalAmb = monthPlantoes.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
   const total = totalPlantao + totalAmb;
 
   const fmt_brl = (v) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v);
-  const fmt_date = (s) => new Date(s+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"});
+  const fmt_date = (s) => { try { const [y,m,d]=String(s).split("T")[0].split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"}); } catch { return String(s); } };
 
   const rows = monthPlantoes.map(p => `
     <tr>
@@ -318,7 +318,7 @@ const Calendar = ({ plantoes, month, year, onDayClick }) => {
   const getDay = (d) => {
     if (!d) return [];
     const ds = `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    return plantoes.filter(p => p.data === ds);
+    return plantoes.filter(p => String(p.data).split("T")[0] === ds);
   };
 
   return (
@@ -422,10 +422,18 @@ export default function App() {
   const nextMonth = () => { if (month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); };
 
   // Filter for current month
+  const parseDate = (data) => {
+    const s = String(data || "").split("T")[0];
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m-1, d);
+  };
+
   const filtered = plantoes.filter(p => {
-    const d = new Date(p.data+"T12:00:00");
-    return d.getMonth()===month && d.getFullYear()===year;
-  }).sort((a,b) => a.data.localeCompare(b.data));
+    try {
+      const d = parseDate(p.data);
+      return d.getMonth()===month && d.getFullYear()===year;
+    } catch { return false; }
+  }).sort((a,b) => String(a.data).localeCompare(String(b.data)));
 
   const totalPlantao = filtered.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
   const totalAmb     = filtered.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
@@ -529,7 +537,7 @@ export default function App() {
               )}
               {filtered.map(p => {
                 const tipo = TIPOS.find(t=>t.id===p.tipo);
-                const d = new Date(p.data+"T12:00:00");
+                const d = (() => { try { const s=String(p.data).split("T")[0]; const [y,m,dd]=s.split("-").map(Number); return new Date(y,m-1,dd); } catch { return new Date(); } })();
                 return (
                   <div key={p.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:"14px 16px", display:"flex", alignItems:"center", gap:14 }}>
                     <div style={{ width:44, height:44, borderRadius:10, background:tipo.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
