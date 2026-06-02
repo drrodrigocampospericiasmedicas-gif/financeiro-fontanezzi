@@ -163,29 +163,41 @@ function checkOAuthCallback() {
 
 // DB helpers (uses auth token if available)
 async function dbFrom(table) {
-  const { url } = getSBCreds();
-  if (!url) return null;
-  const token = localStorage.getItem("sb_token");
+  const { url, key } = getSBCreds();
+  if (!url || !key) return null;
   const base = `${url}/rest/v1/${table}`;
-  const hdrs = authHeaders(token);
+
+  const getHdrs = () => {
+    const token = localStorage.getItem("sb_token");
+    return {
+      "apikey": key,
+      "Authorization": `Bearer ${token || key}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation"
+    };
+  };
+
   return {
     async select(q = "*", extra = "") {
-      const r = await fetch(`${base}?select=${q}&order=date.desc${extra}`, { headers: hdrs });
-      return r.ok ? { data: await r.json() } : { error: await r.text() };
+      const r = await fetch(`${base}?select=${q}&order=date.desc${extra}`, { headers: getHdrs() });
+      if (!r.ok) { const e = await r.text(); console.error(`select ${table}:`, e); return { data: [], error: e }; }
+      return { data: await r.json() };
     },
     async insert(row) {
-      const r = await fetch(base, { method: "POST", headers: hdrs, body: JSON.stringify(row) });
-      return r.ok ? { data: await r.json() } : { error: await r.text() };
+      const r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
+      if (!r.ok) { const e = await r.text(); console.error(`insert ${table}:`, e); return { error: e }; }
+      return { data: await r.json() };
     },
     async update(row, match) {
-      const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
-      const r = await fetch(`${base}?${qs}`, { method: "PATCH", headers: hdrs, body: JSON.stringify(row) });
-      return r.ok ? { data: await r.json() } : { error: await r.text() };
+      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+      const r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
+      if (!r.ok) { const e = await r.text(); console.error(`update ${table}:`, e); return { error: e }; }
+      return { data: await r.json() };
     },
     async del(match) {
-      const qs = Object.entries(match).map(([k,v]) => `${k}=eq.${v}`).join("&");
-      const r = await fetch(`${base}?${qs}`, { method: "DELETE", headers: hdrs });
-      return r.ok ? {} : { error: await r.text() };
+      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+      const r = await fetch(`${base}?${params}`, { method: "DELETE", headers: getHdrs() });
+      return r.ok;
     }
   };
 }
@@ -2608,10 +2620,11 @@ export default function App() {
     // Save to Supabase
     const tbl = await dbFrom("transactions");
     if (tbl) {
+      let saved = 0, failed = 0;
       const batchSize = 20;
       for (let i = 0; i < deduped.length; i += batchSize) {
         const batch = deduped.slice(i, i + batchSize);
-        await Promise.all(batch.map(tx => tbl.insert({
+        const results = await Promise.all(batch.map(tx => tbl.insert({
           id: tx.id,
           account_id: tx.accountId,
           date: tx.date,
@@ -2621,7 +2634,11 @@ export default function App() {
           notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
         })));
+        results.forEach(r => r.error ? failed++ : saved++);
       }
+      if (failed > 0) showToast(`⚠️ ${saved} salvos, ${failed} falharam. Verifique login.`, "warn");
+    } else {
+      showToast("⚠️ Supabase não conectado — dados só na memória", "warn");
     }
 
     // Recalculate and save balance for the imported account
