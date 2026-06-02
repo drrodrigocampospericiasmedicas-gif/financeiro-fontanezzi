@@ -346,14 +346,44 @@ function generateAndSharePDF(plantoes, month, year) {
   const totA = monthData.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
   const tot  = totP + totA;
 
-  const rows = monthData.map(p=>`
+  const plantaoRows = monthData.filter(p=>p.tipo==="plantao");
+  const ambRows     = monthData.filter(p=>p.tipo==="ambulatorio");
+
+  const makeRows = (list) => list.map(p=>`
     <tr>
       <td>${fmt_date(p.data)}</td>
-      <td><span class="badge ${p.tipo}">${p.tipo==="plantao"?"🏥 Plantão":"🩺 Ambulatório"}</span></td>
       <td>${p.local}</td>
       <td class="valor">${fmt_brl(p.valor)}</td>
       <td>${p.obs||""}</td>
     </tr>`).join("");
+
+  const subtotalRow = (label, val, color) => `
+    <tr class="subtotal">
+      <td colspan="2" style="text-align:right;font-weight:600;color:${color}">${label}</td>
+      <td class="valor" style="color:${color}">${fmt_brl(val)}</td>
+      <td></td>
+    </tr>`;
+
+  const rows = `
+    ${plantaoRows.length>0 ? `
+      <tr class="section-header plantao-header">
+        <td colspan="4">🏥 Plantões</td>
+      </tr>
+      ${makeRows(plantaoRows)}
+      ${subtotalRow("Subtotal Plantões", totP, "#1d4ed8")}
+    ` : ""}
+    ${ambRows.length>0 ? `
+      <tr class="section-header amb-header">
+        <td colspan="4">🩺 Ambulatório</td>
+      </tr>
+      ${makeRows(ambRows)}
+      ${subtotalRow("Subtotal Ambulatório", totA, "#0d9488")}
+    ` : ""}
+    <tr class="total-row">
+      <td colspan="2" style="text-align:right;font-weight:700">Total Geral</td>
+      <td class="valor total-val">${fmt_brl(tot)}</td>
+      <td></td>
+    </tr>`;
 
   const bankHtml = (bank.pix||bank.conta) ? `
     <div class="bank"><div class="bank-title">Dados para Pagamento</div>
@@ -403,7 +433,7 @@ function generateAndSharePDF(plantoes, month, year) {
     <div class="tc a"><div class="tl">🩺 Ambulatório</div><div class="tv">${fmt_brl(totA)}</div></div>
     <div class="tc main"><div class="tl">Total do Mês</div><div class="tv">${fmt_brl(tot)}</div></div>
   </div>
-  <table><thead><tr><th>Data</th><th>Tipo</th><th>Local / Hospital</th><th>Valor</th><th>Obs.</th></tr></thead>
+  <table><thead><tr><th>Data</th><th>Local / Hospital</th><th>Valor</th><th>Obs.</th></tr></thead>
   <tbody>${rows}</tbody></table>
   ${bankHtml}
   <div class="footer">Gerado em ${new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})} · ${monthData.length} lançamento${monthData.length!==1?"s":""}</div>
