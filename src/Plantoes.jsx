@@ -333,7 +333,7 @@ const Calendar = ({ plantoes, month, year, onDayClick }) => {
 };
 
 // ─── PDF ───────────────────────────────────────────────────────────────────────
-function generateAndSharePDF(plantoes, month, year) {
+async function generateAndSharePDF(plantoes, month, year) {
   const bank = loadLS(LS_B, {});
   const fmt_date = (s) => { try { const [y,m,d]=String(s).split("T")[0].split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"}); } catch { return s; } };
   const fmt_brl = (v) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
@@ -439,14 +439,40 @@ function generateAndSharePDF(plantoes, month, year) {
   <div class="footer">Gerado em ${new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})} · ${monthData.length} lançamento${monthData.length!==1?"s":""}</div>
 </body></html>`;
 
-  const blob = new Blob([html],{type:"text/html"});
+  const fmt_brl2 = (v) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
+  const blob = new Blob([html], { type:"text/html;charset=utf-8" });
+  const filename = `Plantoes_DrFontanezzi_${MONTHS[month]}_${year}.html`;
+
+  // Try Web Share API with file (Android native share sheet)
+  if (navigator.share) {
+    try {
+      const file = new File([blob], filename, { type:"text/html" });
+      if (navigator.canShare && navigator.canShare({ files:[file] })) {
+        await navigator.share({
+          title: `Plantões Dr. Rodrigo Fontanezzi — ${MONTHS[month]} ${year}`,
+          text: `Plantões · ${MONTHS[month]} ${year} · Total: ${fmt_brl2(tot)}`,
+          files: [file],
+        });
+        return;
+      }
+      // Share text only
+      await navigator.share({
+        title: `Plantões Dr. Rodrigo Fontanezzi — ${MONTHS[month]} ${year}`,
+        text: `Plantões Dr. Rodrigo Fontanezzi\n${MONTHS[month]} ${year}\nTotal: ${fmt_brl2(tot)}`,
+      });
+      return;
+    } catch(e) {
+      if (e.name === "AbortError") return; // user cancelled
+    }
+  }
+
+  // Fallback: just download
   const url = URL.createObjectURL(blob);
-  const win = window.open(url,"_blank");
-  if (win) win.onload = ()=>win.print();
-  setTimeout(()=>{
-    const text = `Plantões Dr. Rodrigo Fontanezzi — ${MONTHS[month]} ${year}\nTotal: ${fmt_brl(tot)}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,"_blank");
-  },1200);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
