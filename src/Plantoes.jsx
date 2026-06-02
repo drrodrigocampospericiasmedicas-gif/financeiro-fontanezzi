@@ -174,14 +174,14 @@ const DayPicker = ({ date, locais, onSelect, onManual, onClose }) => {
   const label = d.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"});
   return (
     <div style={{position:"fixed",inset:0,background:"#000c",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300,padding:0}}>
-      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:500}}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxWidth:500,maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
         <div style={{fontSize:11,color:C.muted,fontFamily:"'IBM Plex Sans',sans-serif",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>Adicionar plantão em</div>
         <div style={{fontSize:18,fontFamily:"'Playfair Display',serif",color:C.text,marginBottom:20,textTransform:"capitalize"}}>{label}</div>
 
         {locais.length > 0 && (
           <>
             <div style={{fontSize:12,color:C.muted,fontFamily:"'IBM Plex Sans',sans-serif",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Locais cadastrados</div>
-            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16,overflowY:"auto",flex:1}}>
               {locais.map(l => {
                 const tipo = TIPOS.find(t=>t.id===l.tipo);
                 return (
@@ -205,13 +205,14 @@ const DayPicker = ({ date, locais, onSelect, onManual, onClose }) => {
           </>
         )}
 
-        <button onClick={()=>onManual(date)} style={{
-          width:"100%", background:C.blue+"18", border:`1px solid ${C.blue}44`,
-          color:C.blue, borderRadius:12, padding:"13px", fontSize:14, fontWeight:500,
-          fontFamily:"'IBM Plex Sans',sans-serif", cursor:"pointer", marginBottom:10
-        }}>✏️ Lançamento manual</button>
-
-        <button onClick={onClose} style={{width:"100%",background:"transparent",color:C.muted,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px",fontSize:14,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>Cancelar</button>
+        <div style={{flexShrink:0,paddingTop:8}}>
+          <button onClick={()=>onManual(date)} style={{
+            width:"100%", background:C.blue+"18", border:`1px solid ${C.blue}44`,
+            color:C.blue, borderRadius:12, padding:"13px", fontSize:14, fontWeight:500,
+            fontFamily:"'IBM Plex Sans',sans-serif", cursor:"pointer", marginBottom:10
+          }}>✏️ Lançamento manual</button>
+          <button onClick={onClose} style={{width:"100%",background:"transparent",color:C.muted,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px",fontSize:14,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>Cancelar</button>
+        </div>
       </div>
     </div>
   );
