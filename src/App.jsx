@@ -2512,13 +2512,11 @@ export default function App() {
       setTxs(sbConnected ? [] : MOCK_TXS);
       return;
     }
-    // User is logged in — always try to load from Supabase
     setLoading(true);
     Promise.all([
       dbFrom("transactions").then(t => t?.select("*")),
       dbFrom("accounts").then(t => t?.select("*")),
     ]).then(([txRes, accRes]) => {
-      // Map DB snake_case → app camelCase
       const txs = (txRes?.data || []).map(t => ({
         id: t.id,
         accountId: t.account_id || t.accountId,
@@ -2530,17 +2528,15 @@ export default function App() {
         internalTransfer: t.internal_transfer || t.internalTransfer || false,
       }));
       setTxs(txs);
+      if (!txs.length) showToast(`Nenhuma transação encontrada no Supabase. Importe um extrato.`, "warn");
       if (accRes?.data?.length) {
-        const accs = accRes.data.map(a => ({
-          ...a,
-          balance: parseFloat(a.balance) || 0,
-        }));
+        const accs = accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
         setAccounts(accs);
         localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accs));
       }
       setLoading(false);
     }).catch(err => {
-      console.error("Load error:", err);
+      showToast(`Erro ao carregar dados: ${err.message}`, "warn");
       setTxs([]);
       setLoading(false);
     });
