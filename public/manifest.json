@@ -1,8 +1,8 @@
 {
-  "id": "/",
+  "id": "financeiro-fontanezzi",
   "name": "Financeiro Fontanezzi",
   "short_name": "Fontanezzi",
-  "description": "Controle financeiro familiar",
+  "description": "Controle financeiro familiar Fontanezzi",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
