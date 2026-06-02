@@ -2508,11 +2508,11 @@ export default function App() {
 
   // Load data from Supabase when user logs in
   useEffect(() => {
-    if (!user || !sbConnected) {
-      if (!sbConnected) setTxs(MOCK_TXS);
-      else setTxs([]);
+    if (!user) {
+      setTxs(sbConnected ? [] : MOCK_TXS);
       return;
     }
+    // User is logged in — always try to load from Supabase
     setLoading(true);
     Promise.all([
       dbFrom("transactions").then(t => t?.select("*")),
@@ -2539,8 +2539,12 @@ export default function App() {
         localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accs));
       }
       setLoading(false);
-    }).catch(() => { setTxs([]); setLoading(false); });
-  }, [user, sbConnected]);
+    }).catch(err => {
+      console.error("Load error:", err);
+      setTxs([]);
+      setLoading(false);
+    });
+  }, [user]);
 
   const handleLogin = () => {
     try { setUser(JSON.parse(localStorage.getItem("sb_user"))); } catch {}
