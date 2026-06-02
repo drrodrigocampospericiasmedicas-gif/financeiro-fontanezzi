@@ -1039,14 +1039,13 @@ const Dashboard = ({ transactions, accounts, onNavigate }) => {
 
 // ─── EXTRATO ──────────────────────────────────────────────────────────────────
 const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
-  const [filter, setFilter] = useState({ search:"", category:"", account:"", month:fmt(TODAY).slice(0,7), owner:"" });
+  const [filter, setFilter] = useState({ search:"", category:"", account:"", month:fmt(TODAY).slice(0,7) });
   const sf = (k,v) => setFilter(f=>({...f,[k]:v}));
 
   const filtered = transactions.filter(t=>{
     if (filter.month    && !t.date.startsWith(filter.month)) return false;
     if (filter.category && t.category !== filter.category)  return false;
     if (filter.account  && t.accountId !== filter.account)  return false;
-    if (filter.owner) { const acc = accounts.find(a=>a.id===t.accountId); if (!acc || acc.owner!==filter.owner) return false; }
     if (filter.search   && !t.description.toLowerCase().includes(filter.search.toLowerCase())) return false;
     return true;
   }).sort((a,b)=>b.date.localeCompare(a.date));
@@ -1064,11 +1063,13 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
           <option value="">Todas categorias</option>
           {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
         </select>
-        <select style={{ ...IS, width:"auto" }} value={filter.owner} onChange={e=>sf("owner",e.target.value)}>
-          <option value="">Todos</option>
-          <option value="rodrigo">👨 Rodrigo</option>
-          <option value="claudia">👩 Cláudia</option>
-          <option value="casal">💑 Casal</option>
+        <select style={{ ...IS, flex:"1 1 140px" }} value={filter.account} onChange={e=>sf("account",e.target.value)}>
+          <option value="">🏦 Todas as contas</option>
+          {accounts.map(a=>(
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
         </select>
         <button onClick={onAdd} style={{ marginLeft:"auto", background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"9px 18px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
           + Lançamento
