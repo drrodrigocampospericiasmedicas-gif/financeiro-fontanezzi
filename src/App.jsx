@@ -34,21 +34,21 @@ async function extractPDFText(base64) {
 
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const C = {
-  bg:        "#0d0f14",
-  surface:   "#13161e",
-  card:      "#1a1e2a",
-  border:    "#252836",
-  gold:      "#c9a84c",
-  goldLight: "#e8c97a",
-  goldDim:   "#7a6330",
-  green:     "#4caf82",
-  red:       "#e05c5c",
-  blue:      "#4c8ec9",
-  purple:    "#9b59b6",
-  pink:      "#e05c9b",
-  text:      "#e8e6df",
-  muted:     "#6b6f7d",
-  soft:      "#9a98a0",
+  bg:        "#f4f6f9",
+  surface:   "#ffffff",
+  card:      "#ffffff",
+  border:    "#e2e8f0",
+  gold:      "#b08a2e",
+  goldLight: "#d4a843",
+  goldDim:   "#8a6d1e",
+  green:     "#16a06b",
+  red:       "#dc2626",
+  blue:      "#2563eb",
+  purple:    "#7c3aed",
+  pink:      "#db2777",
+  text:      "#1e2535",
+  muted:     "#94a3b8",
+  soft:      "#64748b",
 };
 
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap');`;
