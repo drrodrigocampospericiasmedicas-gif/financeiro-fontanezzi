@@ -2640,28 +2640,8 @@ export default function App() {
         })));
         results.forEach(r => r.error ? failed++ : saved++);
       }
-      if (failed > 0) showToast(`⚠️ ${saved} salvos, ${failed} falharam. Verifique login.`, "warn");
-    } else {
-      showToast("⚠️ Supabase não conectado — dados só na memória", "warn");
-    }
-
-    // Recalculate and save balance for the imported account
-    if (accountId) {
-      setAccounts(accs => {
-        const updated = accs.map(a => {
-          if (a.id !== accountId) return a;
-          const allTxsForAccount = [...transactions, ...deduped].filter(t => t.accountId === accountId && !t.internalTransfer);
-          const newBalance = allTxsForAccount.reduce((s, t) => s + parseFloat(t.amount), 0);
-          const updatedAcc = { ...a, balance: Math.round(newBalance * 100) / 100 };
-          dbFrom("accounts").then(tbl => tbl?.update({ balance: updatedAcc.balance }, { id: accountId }));
-          return updatedAcc;
-        });
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(updated));
-        return updated;
-      });
-    }
-
-    showToast(`✅ ${deduped.length} lançamentos salvos!${skipped > 0 ? ` (${skipped} duplicados ignorados)` : ""}`);
+    if (failed > 0) showToast(`⚠️ ${saved} salvos, ${failed} falharam. Verifique login.`);
+    else showToast(`✅ ${deduped.length} lançamentos salvos!${skipped > 0 ? ` (${skipped} duplicados ignorados)` : ""}`);
   };
 
   // Show login screen if not authenticated
