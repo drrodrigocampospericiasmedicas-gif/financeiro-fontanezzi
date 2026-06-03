@@ -1783,21 +1783,27 @@ const ContasView = ({ accounts, setAccounts }) => {
   const openNew  = () => { setForm({ name:"", type:"corrente", owner:"rodrigo", balance:"", color:ACCOUNT_COLORS[0] }); setEditAcc(null); setShowForm(true); };
   const openEdit = (a) => { setForm({ ...a, balance:String(a.balance) }); setEditAcc(a); setShowForm(true); };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) return;
-    const bal = parseFloat(form.balance.replace(",",".")) || 0;
+    const bal = parseFloat(String(form.balance).replace(",",".")) || 0;
     const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
     const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
     setAccounts(next);
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+    // Save to Supabase
+    const tbl = await dbFrom("accounts");
+    if (tbl) {
+      if (editAcc) await tbl.update(acc, { id: acc.id });
+      else await tbl.insert(acc);
+    }
     setShowForm(false); setEditAcc(null);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (!window.confirm("Excluir esta conta?")) return;
     const next = accounts.filter(a=>a.id!==id);
     setAccounts(next);
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+    const tbl = await dbFrom("accounts");
+    if (tbl) await tbl.del({ id });
   };
 
   return (
@@ -2531,9 +2537,7 @@ export default function App() {
   const [nav, setNav]           = useState("dashboard");
   const [showConfig, setConfig] = useState(false);
   const [transactions, setTxs]  = useState([]);
-  const [accounts, setAccounts] = useState(() => {
-    try { const s = localStorage.getItem(ACCOUNTS_KEY); return s ? JSON.parse(s) : MOCK_ACCOUNTS; } catch { return MOCK_ACCOUNTS; }
-  });
+  const [accounts, setAccounts] = useState(MOCK_ACCOUNTS); // will be overwritten by Supabase
   const [editTx, setEditTx]     = useState(null);
   const [showForm, setForm]     = useState(false);
   const [toast, setToast]       = useState(null);
@@ -2578,7 +2582,8 @@ export default function App() {
       if (accRes?.data?.length) {
         const accs = accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
         setAccounts(accs);
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accs));
+      } else {
+        setAccounts([]); // no accounts yet — start fresh
       }
       setLoading(false);
     }).catch(err => {
@@ -2660,12 +2665,8 @@ export default function App() {
 
     // Atualizar saldo da conta com o saldo final do extrato
     if (accountId && saldoFinal != null) {
-      setAccounts(accs => {
-        const updated = accs.map(a => a.id !== accountId ? a : { ...a, balance: saldoFinal });
-        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(updated));
-        dbFrom("accounts").then(t => t?.update({ balance: saldoFinal }, { id: accountId }));
-        return updated;
-      });
+      setAccounts(accs => accs.map(a => a.id !== accountId ? a : { ...a, balance: saldoFinal }));
+      dbFrom("accounts").then(t => t?.update({ balance: saldoFinal }, { id: accountId }));
       showToast(`💰 Saldo atualizado: ${brl(saldoFinal)}`);
     }
   };
