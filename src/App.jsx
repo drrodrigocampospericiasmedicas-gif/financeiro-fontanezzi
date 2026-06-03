@@ -169,9 +169,11 @@ async function dbFrom(table) {
 
   const getHdrs = () => {
     const token = localStorage.getItem("sb_token");
+    // Always use user JWT if available — required for RLS policies
+    const authToken = token || key;
     return {
       "apikey": key,
-      "Authorization": `Bearer ${token || key}`,
+      "Authorization": `Bearer ${authToken}`,
       "Content-Type": "application/json",
       "Prefer": "return=representation"
     };
@@ -180,23 +182,25 @@ async function dbFrom(table) {
   return {
     async select(q = "*", extra = "") {
       const r = await fetch(`${base}?select=${q}&order=date.desc${extra}`, { headers: getHdrs() });
-      if (!r.ok) { const e = await r.text(); console.error(`select ${table}:`, e); return { data: [], error: e }; }
+      if (!r.ok) { const e = await r.text(); console.error(`select ${table}:`, r.status, e); return { data: [], error: e }; }
       return { data: await r.json() };
     },
     async insert(row) {
       const r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
-      if (!r.ok) { const e = await r.text(); console.error(`insert ${table}:`, e); return { error: e }; }
-      return { data: await r.json() };
+      if (!r.ok) { const e = await r.text(); console.error(`insert ${table}:`, r.status, e); return { error: e }; }
+      const text = await r.text();
+      return { data: text ? JSON.parse(text) : {} };
     },
     async update(row, match) {
-      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
       const r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
-      if (!r.ok) { const e = await r.text(); console.error(`update ${table}:`, e); return { error: e }; }
-      return { data: await r.json() };
+      if (!r.ok) { const e = await r.text(); console.error(`update ${table}:`, r.status, e); return { error: e }; }
+      return { data: {} };
     },
     async del(match) {
-      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${v}`).join("&");
+      const params = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
       const r = await fetch(`${base}?${params}`, { method: "DELETE", headers: getHdrs() });
+      if (!r.ok) { const e = await r.text(); console.error(`delete ${table}:`, r.status, e); }
       return r.ok;
     }
   };
