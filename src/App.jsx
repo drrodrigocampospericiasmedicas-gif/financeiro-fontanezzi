@@ -1177,6 +1177,7 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
   const [selAcc, setSelAcc]   = useState(accounts[0]?.id||"");
   const [dupWarnings, setDups] = useState([]);
   const [pdfStatus, setPdfStatus] = useState("");
+  const [saldoExtratoFinal, setSaldoExtratoFinal] = useState(null);
   const pdfStatusRef = useRef("");
 
   const setStatus = (msg) => {
@@ -1241,12 +1242,24 @@ const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
           model: "claude-haiku-4-5-20251001",
           max_tokens: 4000,
           messages: [{ role: "user", content:
-`Extrato bancário brasileiro. Retorne SOMENTE array JSON sem markdown.
-Formato: [{"date":"YYYY-MM-DD","description":"texto","amount":numero}]
-Débitos/saídas = negativos. Créditos/entradas = positivos.
-Ignore "SALDO DO DIA", totais, cabeçalho, rodapé.
-TEXTO: ${fullText.slice(0, 8000)}
-Responda APENAS o array JSON:`
+`Extrato bancário brasileiro. Retorne SOMENTE um objeto JSON sem markdown.
+
+Formato:
+{
+  "saldo_final": numero_ou_null,
+  "transacoes": [{"date":"YYYY-MM-DD","description":"texto","amount":numero}]
+}
+
+Regras:
+- saldo_final = saldo mais recente do extrato (ex: "Saldo final do período", "Saldo ao final do dia" mais recente, "Saldo em conta"). Número puro, sem R$.
+- Débitos/saídas = amount negativo. Créditos/entradas = positivo.
+- Ignore linhas de saldo nas transações, cabeçalho, rodapé.
+- Converta datas DD/MM/AAAA para YYYY-MM-DD.
+
+TEXTO DO EXTRATO:
+${fullText.slice(0, 8000)}
+
+Responda APENAS o objeto JSON:`
           }]
         })
       });
@@ -1254,20 +1267,33 @@ Responda APENAS o array JSON:`
       if (!res.ok) {
         const err = await res.json().catch(()=>({}));
         status("❌ API HTTP " + res.status + ": " + (err.error?.message || res.statusText));
-        return [];
+        return { txs: [], saldoFinal: null };
       }
 
       const data = await res.json();
       const aiText = data.content?.[0]?.text || "";
-      const match = aiText.match(/\[[\s\S]*\]/);
 
-      if (!match) {
-        status("❌ IA não retornou JSON. Preview: " + aiText.slice(0,60));
-        return [];
+      // Try to parse as object with saldo_final + transacoes
+      let parsed = null;
+      try {
+        const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      } catch(e) {}
+
+      // Fallback: try plain array
+      if (!parsed?.transacoes) {
+        try {
+          const arrMatch = aiText.match(/\[[\s\S]*\]/);
+          if (arrMatch) parsed = { transacoes: JSON.parse(arrMatch[0]), saldo_final: null };
+        } catch(e) {}
       }
 
-      const txs = JSON.parse(match[0]);
-      const valid = txs.map(t => ({
+      if (!parsed?.transacoes) {
+        status("❌ IA não retornou JSON. Preview: " + aiText.slice(0,60));
+        return { txs: [], saldoFinal: null };
+      }
+
+      const valid = parsed.transacoes.map(t => ({
         id: "imp_" + Math.random().toString(36).slice(2),
         date: String(t.date||"").replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1") || fmt(TODAY),
         description: String(t.description||"").trim(),
@@ -1275,12 +1301,14 @@ Responda APENAS o array JSON:`
         accountId: selAcc, category: "outros", keep: true, internalTransfer: false,
       })).filter(t => t.description && t.amount !== 0);
 
-      status(`✅ ${valid.length} transações encontradas!`);
-      return valid;
+      const saldoFinal = parsed.saldo_final != null ? parseFloat(String(parsed.saldo_final).replace(",",".")) : null;
+
+      status(`✅ ${valid.length} transações encontradas!${saldoFinal != null ? ` Saldo: R$ ${saldoFinal.toFixed(2)}` : ""}`);
+      return { txs: valid, saldoFinal };
 
     } catch (e) {
       status("❌ " + (e.message || String(e)));
-      return [];
+      return { txs: [], saldoFinal: null };
     }
   };
 
@@ -1290,26 +1318,27 @@ Responda APENAS o array JSON:`
     setStep("parsing");
     setPdfStatus("");
     let parsed = [];
+    let saldoFinal = null;
 
     if (file.name.match(/\.(csv|txt)$/i)) {
       const text = await file.text();
       parsed = parseCSV(text);
       if (!parsed.length) { alert("Não foi possível interpretar o CSV. Verifique o formato."); setStep("idle"); return; }
     } else if (file.name.match(/\.pdf$/i)) {
-      // Convert to base64 and send to AI
       const b64 = await new Promise((res,rej) => {
         const r = new FileReader();
         r.onload = () => res(r.result.split(",")[1]);
         r.onerror = rej;
         r.readAsDataURL(file);
       });
-      parsed = await parsePDFwithAI(b64);
+      const result = await parsePDFwithAI(b64);
+      parsed = result.txs || [];
+      saldoFinal = result.saldoFinal;
       if (!parsed.length) {
         alert("Erro ao processar PDF:\n\n" + pdfStatusRef.current);
         setStep("idle"); return;
       }
     } else if (file.name.match(/\.ofx$/i)) {
-      // Basic OFX parser
       const text = await file.text();
       const txMatches = [...text.matchAll(/<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi)];
       parsed = txMatches.map(m => {
@@ -1343,6 +1372,7 @@ Responda APENAS o array JSON:`
     const deduped = withInternal.map(r => ({ ...r, keep: !dups.find(d=>d.id===r.id) }));
 
     setRows(deduped);
+    setSaldoExtratoFinal(saldoFinal);
     setStep("review");
 
     // Classify with AI
@@ -1360,7 +1390,7 @@ Responda APENAS o array JSON:`
 
   const confirmImport = () => {
     const toImport = rows.filter(r=>r.keep);
-    onImport(toImport, selAcc);
+    onImport(toImport, selAcc, saldoExtratoFinal);
     setStep("done");
   };
 
@@ -2598,50 +2628,46 @@ export default function App() {
     showToast("Removido","warn");
   };
 
-  const importTxs = async (rows, accountId) => {
-    // Deduplicate against existing transactions before saving
-    const deduped = rows.filter(r => {
-      return !transactions.some(t =>
-        t.accountId === r.accountId &&
-        t.date === r.date &&
-        Math.abs(parseFloat(t.amount)) === Math.abs(parseFloat(r.amount)) &&
-        t.description.toLowerCase().trim() === r.description.toLowerCase().trim()
-      );
-    });
-
+  const importTxs = async (rows, accountId, saldoFinal) => {
+    const deduped = rows.filter(r => !transactions.some(t =>
+      t.accountId === r.accountId && t.date === r.date &&
+      Math.abs(parseFloat(t.amount)) === Math.abs(parseFloat(r.amount)) &&
+      t.description.toLowerCase().trim() === r.description.toLowerCase().trim()
+    ));
     const skipped = rows.length - deduped.length;
+    if (deduped.length === 0) { showToast(`Todas as ${rows.length} transações já existem.`); return; }
 
-    if (deduped.length === 0) {
-      showToast(`Todas as ${rows.length} transações já existem — nada importado.`, "warn");
-      return;
-    }
-
-    // Update local state immediately
     setTxs(ts => [...deduped, ...ts]);
-    if (skipped > 0) showToast(`Salvando ${deduped.length} novos lançamentos (${skipped} duplicados ignorados)...`);
-    else showToast(`Salvando ${deduped.length} lançamentos...`);
+    showToast(`Salvando ${deduped.length} lançamentos...`);
 
-    // Save to Supabase
     const tbl = await dbFrom("transactions");
     if (tbl) {
       let saved = 0, failed = 0;
-      const batchSize = 20;
-      for (let i = 0; i < deduped.length; i += batchSize) {
-        const batch = deduped.slice(i, i + batchSize);
-        const results = await Promise.all(batch.map(tx => tbl.insert({
-          id: tx.id,
-          account_id: tx.accountId,
-          date: tx.date,
-          description: tx.description,
-          amount: tx.amount,
-          category: tx.category,
-          notes: tx.notes || "",
+      for (let i = 0; i < deduped.length; i += 20) {
+        const results = await Promise.all(deduped.slice(i, i+20).map(tx => tbl.insert({
+          id: tx.id, account_id: tx.accountId, date: tx.date,
+          description: tx.description, amount: tx.amount,
+          category: tx.category, notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
         })));
         results.forEach(r => r.error ? failed++ : saved++);
       }
-    if (failed > 0) showToast(`⚠️ ${saved} salvos, ${failed} falharam. Verifique login.`);
-    else showToast(`✅ ${deduped.length} lançamentos salvos!${skipped > 0 ? ` (${skipped} duplicados ignorados)` : ""}`);
+      if (failed > 0) showToast(`⚠️ ${saved} salvos, ${failed} falharam.`);
+      else showToast(`✅ ${deduped.length} salvos!${skipped > 0 ? ` (${skipped} duplicados ignorados)` : ""}`);
+    } else {
+      showToast("⚠️ Supabase não conectado");
+    }
+
+    // Atualizar saldo da conta com o saldo final do extrato
+    if (accountId && saldoFinal != null) {
+      setAccounts(accs => {
+        const updated = accs.map(a => a.id !== accountId ? a : { ...a, balance: saldoFinal });
+        localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(updated));
+        dbFrom("accounts").then(t => t?.update({ balance: saldoFinal }, { id: accountId }));
+        return updated;
+      });
+      showToast(`💰 Saldo atualizado: ${brl(saldoFinal)}`);
+    }
   };
 
   // Show login screen if not authenticated
