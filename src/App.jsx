@@ -79,9 +79,12 @@ const DEFAULT_CATEGORIES = [
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 let _sbUrl = null, _sbKey = null;
 
+const SB_URL_DEFAULT = "https://besombpjuvqrcxtnstvk.supabase.co";
+const SB_KEY_DEFAULT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlc29tYnBqdXZxcmN4dG5zdHZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxOTYyMzYsImV4cCI6MjA5NTc3MjIzNn0.m2-frtJZEFkSBnHpPRSvv2gjCFYbIBYhVmFYY0WNpBQ";
+
 function getSBCreds() {
-  _sbUrl = localStorage.getItem("sb_url");
-  _sbKey = localStorage.getItem("sb_key");
+  _sbUrl = localStorage.getItem("sb_url") || SB_URL_DEFAULT;
+  _sbKey = localStorage.getItem("sb_key") || SB_KEY_DEFAULT;
   return { url: _sbUrl, key: _sbKey };
 }
 
@@ -2543,7 +2546,7 @@ export default function App() {
   const [toast, setToast]       = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading]   = useState(false);
-  const sbConnected             = !!localStorage.getItem("sb_url");
+  const sbConnected = true; // credentials hardcoded
 
   const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
