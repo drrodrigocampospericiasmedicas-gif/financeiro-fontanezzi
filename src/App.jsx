@@ -1992,28 +1992,24 @@ const Carteira = ({ accounts }) => {
 
       {/* ── PATRIMÔNIO TOTAL ─────────────────────────────────────── */}
       <div style={{
-        background: `linear-gradient(135deg, ${C.card} 0%, #1e2335 100%)`,
-        border: `1px solid ${C.goldDim}55`, borderRadius: 20, padding: "28px 32px",
-        display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20
+        background: `linear-gradient(135deg, #1e2535 0%, #2d3550 100%)`,
+        borderRadius: 20, padding: "28px 28px",
       }}>
-        <div>
-          <div style={{ fontSize: 11, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 6 }}>Patrimônio disponível total</div>
-          <div style={{ fontSize: 42, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.goldLight, lineHeight: 1 }}>{brl(grandTotal)}</div>
-          <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginTop: 6 }}>Contas bancárias + dinheiro em espécie</div>
-        </div>
-        <div style={{ display: "flex", gap: 24 }}>
+        <div style={{ fontSize: 11, color: "#94a3b8", letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 8 }}>Patrimônio disponível total</div>
+        <div style={{ fontSize: 44, fontFamily: "'Cormorant Garamond',serif", fontWeight: 700, color: grandTotal >= 0 ? "#f0c060" : "#ef4444", lineHeight: 1, marginBottom: 6 }}>{brl(grandTotal)}</div>
+        <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'DM Sans',sans-serif", marginBottom: 20 }}>Contas bancárias + dinheiro em espécie</div>
+        <div style={{ display: "flex", gap: 16 }}>
           {[
-            ["🏦 Contas", brl(accountsTotal), C.blue],
-            ["💵 Dinheiro", brl(cashBalance), cashBalance >= 0 ? C.green : C.red],
+            ["🏦 Contas", brl(accountsTotal), "#60a5fa"],
+            ["💵 Dinheiro", brl(cashBalance), cashBalance >= 0 ? "#34d399" : "#f87171"],
           ].map(([label, val, col]) => (
-            <div key={label} style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{val}</div>
+            <div key={label} style={{ background: "rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 16px", flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: 18, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{val}</div>
             </div>
           ))}
         </div>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 18 }}>
 
         {/* ── CONTAS BANCÁRIAS ─────────────────────────────────────── */}
