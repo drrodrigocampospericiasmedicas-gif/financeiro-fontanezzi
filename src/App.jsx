@@ -1793,17 +1793,37 @@ const ContasView = ({ accounts, setAccounts }) => {
     const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
     const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
     setAccounts(next);
-    // Save to Supabase
-    const tbl = await dbFrom("accounts");
-    if (tbl) {
-      const result = editAcc ? await tbl.update(acc, { id: acc.id }) : await tbl.insert(acc);
-      if (result?.error) {
-        alert("Erro ao salvar: " + result.error);
+
+    const { url, key } = getSBCreds();
+    const token = localStorage.getItem("sb_token");
+
+    // Direct fetch for better error visibility
+    try {
+      const endpoint = `${url}/rest/v1/accounts`;
+      const method = editAcc ? "PATCH" : "POST";
+      const fullUrl = editAcc ? `${endpoint}?id=eq.${acc.id}` : endpoint;
+
+      const r = await fetch(fullUrl, {
+        method,
+        headers: {
+          "apikey": key,
+          "Authorization": `Bearer ${token || key}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify(acc)
+      });
+
+      if (!r.ok) {
+        const errText = await r.text();
+        alert(`❌ Erro ${r.status} ao salvar conta:\n${errText}\n\nToken: ${token ? "✅ presente" : "❌ ausente"}`);
         return;
       }
-    } else {
-      alert("Supabase não conectado — conta salva localmente apenas.");
+      alert("✅ Conta salva no Supabase!");
+    } catch(e) {
+      alert(`❌ Erro de rede: ${e.message}`);
     }
+
     setShowForm(false); setEditAcc(null);
   };
 
