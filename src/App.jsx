@@ -2530,6 +2530,597 @@ const Dividas = () => {
   );
 };
 
+// ─── CARTÕES DE CRÉDITO ───────────────────────────────────────────────────────
+const CARTOES_KEY = "fontanezzi_cartoes";
+const CARTAO_TXS_KEY = "fontanezzi_cartao_txs";
+
+// Helpers locais
+const loadCartoes = () => { try { return JSON.parse(localStorage.getItem(CARTOES_KEY)) || []; } catch { return []; } };
+const saveCartoes = (d) => localStorage.setItem(CARTOES_KEY, JSON.stringify(d));
+const loadCartaoTxs = () => { try { return JSON.parse(localStorage.getItem(CARTAO_TXS_KEY)) || []; } catch { return []; } };
+const saveCartaoTxs = (d) => localStorage.setItem(CARTAO_TXS_KEY, JSON.stringify(d));
+
+const BANDEIRAS = ["Visa","Mastercard","Elo","American Express","Hipercard","Outros"];
+const CARTAO_COLORS = ["#1a56db","#e3a008","#0e9f6e","#9061f9","#e74694","#6b7280"];
+
+// ─── FORM CADASTRO CARTÃO ─────────────────────────────────────────────────────
+const CartaoForm = ({ initial, onSave, onClose }) => {
+  const blank = { nome:"", bandeira:"Visa", owner:"rodrigo", limite:"", vencimento:"", cor:CARTAO_COLORS[0] };
+  const [f, setF] = useState(initial ? {...initial, limite:String(initial.limite||"")} : blank);
+  const sf = (k,v) => setF(x=>({...x,[k]:v}));
+  const handleSave = () => {
+    if (!f.nome.trim()) return;
+    onSave({ ...f, id:initial?.id||("cc_"+Date.now()), limite:parseFloat(String(f.limite).replace(",","."))||0 });
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"#0009",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:20,padding:28,width:"100%",maxWidth:440}}>
+        <div style={{fontSize:20,fontFamily:"'Cormorant Garamond',serif",color:C.text,marginBottom:22}}>{initial?"Editar cartão":"Novo cartão"}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Nome do cartão</div>
+            <input style={IS} placeholder="Ex: Nubank, C6, Inter..." value={f.nome} onChange={e=>sf("nome",e.target.value)}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Bandeira</div>
+              <select style={IS} value={f.bandeira} onChange={e=>sf("bandeira",e.target.value)}>
+                {BANDEIRAS.map(b=><option key={b} value={b}>{b}</option>)}
+              </select></div>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Titular</div>
+              <select style={IS} value={f.owner} onChange={e=>sf("owner",e.target.value)}>
+                <option value="rodrigo">👨 Rodrigo</option>
+                <option value="claudia">👩 Cláudia</option>
+                <option value="casal">💑 Casal</option>
+              </select></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Limite (R$)</div>
+              <input style={IS} placeholder="0,00" value={f.limite} onChange={e=>sf("limite",e.target.value)}/></div>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Vencimento (dia)</div>
+              <input style={IS} placeholder="10" type="number" min="1" max="31" value={f.vencimento} onChange={e=>sf("vencimento",e.target.value)}/></div>
+          </div>
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:8,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Cor</div>
+            <div style={{display:"flex",gap:8}}>
+              {CARTAO_COLORS.map(cor=>(
+                <div key={cor} onClick={()=>sf("cor",cor)} style={{width:28,height:28,borderRadius:"50%",background:cor,cursor:"pointer",border:f.cor===cor?"3px solid #1e2535":"3px solid transparent",transition:"all .15s"}}/>
+              ))}
+            </div></div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:22}}>
+          <button onClick={handleSave} style={{flex:1,background:C.gold,color:C.bg,border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:600,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>Salvar</button>
+          <button onClick={onClose} style={{background:"transparent",color:C.muted,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 18px",fontSize:14,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── FORM LANÇAMENTO CARTÃO ───────────────────────────────────────────────────
+const CartaoTxForm = ({ cartoes, initial, onSave, onClose }) => {
+  const blank = { cartaoId:cartoes[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"" };
+  const [f, setF] = useState(initial ? {...initial, amount:String(Math.abs(initial.amount||""))} : blank);
+  const sf = (k,v) => setF(x=>({...x,[k]:v}));
+  const handleSave = () => {
+    if (!f.description.trim() || !f.amount || !f.cartaoId) return;
+    const amt = parseFloat(String(f.amount).replace(",","."));
+    if (isNaN(amt)) return;
+    onSave({ ...f, id:initial?.id||("cctx_"+Date.now()), amount:-Math.abs(amt) });
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"#0009",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16}}>
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:20,padding:28,width:"100%",maxWidth:440}}>
+        <div style={{fontSize:20,fontFamily:"'Cormorant Garamond',serif",color:C.text,marginBottom:22}}>{initial?"Editar lançamento":"Novo lançamento"}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Cartão</div>
+            <select style={IS} value={f.cartaoId} onChange={e=>sf("cartaoId",e.target.value)}>
+              {cartoes.map(c=><option key={c.id} value={c.id}>{c.nome} ({c.bandeira})</option>)}
+            </select></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Data</div>
+              <input type="date" style={IS} value={f.date} onChange={e=>sf("date",e.target.value)}/></div>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Valor (R$)</div>
+              <input style={IS} placeholder="0,00" value={f.amount} onChange={e=>sf("amount",e.target.value)}/></div>
+          </div>
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Descrição</div>
+            <input style={IS} placeholder="Ex: Supermercado, Farmácia..." value={f.description} onChange={e=>sf("description",e.target.value)}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Categoria</div>
+              <select style={IS} value={f.category} onChange={e=>sf("category",e.target.value)}>
+                {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+              </select></div>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Obs.</div>
+              <input style={IS} placeholder="Opcional..." value={f.notes||""} onChange={e=>sf("notes",e.target.value)}/></div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:22}}>
+          <button onClick={handleSave} style={{flex:1,background:C.gold,color:C.bg,border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:600,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>Salvar</button>
+          <button onClick={onClose} style={{background:"transparent",color:C.muted,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 18px",fontSize:14,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── CARTÕES MAIN COMPONENT ───────────────────────────────────────────────────
+const Cartoes = () => {
+  const [cartoes, setCartoes]       = useState(() => loadCartoes());
+  const [txs, setTxs]               = useState(() => loadCartaoTxs());
+  const [showCartaoForm, setShowCC] = useState(false);
+  const [editCartao, setEditCC]     = useState(null);
+  const [showTxForm, setShowTx]     = useState(false);
+  const [editTx, setEditTx]         = useState(null);
+  const [selCartao, setSelCartao]   = useState(null); // null = todos
+  const [selMonth, setSelMonth]     = useState(fmt(TODAY).slice(0,7));
+  const [uploading, setUploading]   = useState(false);
+  const [uploadStatus, setUpStatus] = useState("");
+  const [tab, setTab]               = useState("resumo"); // resumo | lancamentos | cartoes
+  const toastRef = useRef(null);
+
+  const showToast = (msg) => {
+    setUpStatus(msg);
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setUpStatus(""), 3000);
+  };
+
+  const saveCC = (c) => {
+    const next = cartoes.find(x=>x.id===c.id) ? cartoes.map(x=>x.id===c.id?c:x) : [...cartoes,c];
+    setCartoes(next); saveCartoes(next);
+    setShowCC(false); setEditCC(null);
+    showToast("✅ Cartão salvo!");
+  };
+
+  const deleteCC = (id) => {
+    if (!window.confirm("Excluir este cartão?")) return;
+    const next = cartoes.filter(c=>c.id!==id);
+    setCartoes(next); saveCartoes(next);
+    const txNext = txs.filter(t=>t.cartaoId!==id);
+    setTxs(txNext); saveCartaoTxs(txNext);
+  };
+
+  const saveTx = (tx) => {
+    const next = txs.find(x=>x.id===tx.id) ? txs.map(x=>x.id===tx.id?tx:x) : [tx,...txs];
+    setTxs(next); saveCartaoTxs(next);
+    setShowTx(false); setEditTx(null);
+    showToast("✅ Lançamento salvo!");
+  };
+
+  const deleteTx = (id) => {
+    const next = txs.filter(t=>t.id!==id);
+    setTxs(next); saveCartaoTxs(next);
+  };
+
+  // Upload fatura PDF
+  const handleFaturaUpload = async (e, cartaoId) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUpStatus("📄 Lendo fatura PDF...");
+
+    try {
+      // Load pdf.js
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+          s.onload = () => {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+              "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            resolve();
+          };
+          s.onerror = () => reject(new Error("Falha ao carregar pdf.js"));
+          document.head.appendChild(s);
+        });
+      }
+
+      // Extract text
+      const b64 = await new Promise((res,rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const pdf = await window.pdfjsLib.getDocument({ data:bytes }).promise;
+      let fullText = "";
+      for (let p=1; p<=pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        fullText += content.items.map(i=>i.str).join(" ") + "\n";
+      }
+
+      setUpStatus("🤖 IA extraindo transações e limite...");
+
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-haiku-4-5-20251001",
+          max_tokens:4000,
+          messages:[{ role:"user", content:
+`Fatura de cartão de crédito brasileiro. Retorne SOMENTE objeto JSON sem markdown.
+
+Formato:
+{
+  "limite_total": numero_ou_null,
+  "limite_disponivel": numero_ou_null,
+  "valor_fatura": numero_ou_null,
+  "transacoes": [{"date":"YYYY-MM-DD","description":"texto","amount":numero_positivo,"category":"categoria"}]
+}
+
+Categorias disponíveis: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
+
+Regras:
+- Todas as transações = amount POSITIVO (são débitos do cartão)
+- Ignore pagamentos da fatura, encargos e totais
+- Converta datas DD/MM/AAAA para YYYY-MM-DD
+- Se não encontrar limite, retorne null
+
+TEXTO DA FATURA:
+${fullText.slice(0, 8000)}
+
+Responda APENAS o objeto JSON:`
+          }]
+        })
+      });
+
+      if (!res.ok) { setUpStatus("❌ Erro na API: " + res.status); setUploading(false); return; }
+
+      const data = await res.json();
+      const aiText = data.content?.[0]?.text || "";
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) { setUpStatus("❌ IA não retornou JSON válido"); setUploading(false); return; }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Update limite if found
+      if (parsed.limite_total && cartaoId) {
+        setCartoes(prev => {
+          const next = prev.map(c => c.id===cartaoId ? {...c, limite:parsed.limite_total, limiteDisponivel:parsed.limite_disponivel} : c);
+          saveCartoes(next);
+          return next;
+        });
+      }
+
+      // Add transactions
+      const newTxs = (parsed.transacoes||[]).map(t => ({
+        id: "cctx_"+Math.random().toString(36).slice(2),
+        cartaoId: cartaoId || cartoes[0]?.id,
+        date: String(t.date||"").replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1") || fmt(TODAY),
+        description: String(t.description||"").trim(),
+        amount: -Math.abs(parseFloat(t.amount)||0),
+        category: t.category || "outros",
+        notes: "",
+      })).filter(t => t.description && t.amount !== 0);
+
+      // Dedup
+      const deduped = newTxs.filter(n => !txs.some(t =>
+        t.cartaoId===n.cartaoId && t.date===n.date &&
+        Math.abs(t.amount)===Math.abs(n.amount) &&
+        t.description.toLowerCase()===n.description.toLowerCase()
+      ));
+
+      const next = [...deduped, ...txs];
+      setTxs(next); saveCartaoTxs(next);
+      setUpStatus(`✅ ${deduped.length} transações importadas!${parsed.limite_total ? ` Limite: ${brl(parsed.limite_total)}` : ""}`);
+    } catch(e) {
+      setUpStatus("❌ " + e.message);
+    }
+    setUploading(false);
+  };
+
+  // Upload comprovante (ticket)
+  const handleComprovanteUpload = async (e, cartaoId) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUpStatus("🤖 IA lendo comprovante...");
+    try {
+      const b64 = await new Promise((res,rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+
+      const isImage = file.type.startsWith("image/");
+      const isPDF = file.type === "application/pdf";
+
+      let content;
+      if (isImage) {
+        content = [
+          { type:"image", source:{ type:"base64", media_type:file.type, data:b64 } },
+          { type:"text", text:`Comprovante de compra no cartão. Extraia: data (YYYY-MM-DD), estabelecimento/descrição, valor total. Retorne JSON: {"date":"YYYY-MM-DD","description":"texto","amount":valor_positivo,"category":"categoria"}. Categorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, outros. Responda APENAS o JSON.` }
+        ];
+      } else {
+        // PDF comprovante — extract text first
+        if (!window.pdfjsLib) {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+            s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; resolve(); };
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const pdf = await window.pdfjsLib.getDocument({ data:bytes }).promise;
+        let text = "";
+        for (let p=1; p<=pdf.numPages; p++) {
+          const page = await pdf.getPage(p);
+          const c = await page.getTextContent();
+          text += c.items.map(i=>i.str).join(" ") + "\n";
+        }
+        content = `Comprovante de compra: ${text.slice(0,3000)}\n\nExtraia: data (YYYY-MM-DD), estabelecimento, valor. Retorne JSON: {"date":"YYYY-MM-DD","description":"texto","amount":valor_positivo,"category":"categoria"}. Responda APENAS o JSON.`;
+      }
+
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ model:"claude-haiku-4-5-20251001", max_tokens:500, messages:[{ role:"user", content }] })
+      });
+
+      if (!res.ok) { setUpStatus("❌ Erro API"); setUploading(false); return; }
+      const data = await res.json();
+      const aiText = data.content?.[0]?.text || "";
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) { setUpStatus("❌ Não foi possível ler o comprovante"); setUploading(false); return; }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      const tx = {
+        id: "cctx_"+Math.random().toString(36).slice(2),
+        cartaoId: cartaoId || cartoes[0]?.id,
+        date: String(parsed.date||"").replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1") || fmt(TODAY),
+        description: String(parsed.description||"").trim(),
+        amount: -Math.abs(parseFloat(parsed.amount)||0),
+        category: parsed.category || "outros",
+        notes: "",
+      };
+      if (!tx.description || !tx.amount) { setUpStatus("❌ Não encontrou dados no comprovante"); setUploading(false); return; }
+
+      const next = [tx, ...txs];
+      setTxs(next); saveCartaoTxs(next);
+      setUpStatus(`✅ Lançado: ${tx.description} — ${brl(Math.abs(tx.amount))}`);
+    } catch(e) {
+      setUpStatus("❌ " + e.message);
+    }
+    setUploading(false);
+  };
+
+  // Filter txs
+  const filteredTxs = txs.filter(t => {
+    if (selCartao && t.cartaoId !== selCartao) return false;
+    if (selMonth && !t.date.startsWith(selMonth)) return false;
+    return true;
+  }).sort((a,b) => b.date.localeCompare(a.date));
+
+  // Totals per card this month
+  const gastoByCartao = (id) => txs.filter(t => t.cartaoId===id && t.date.startsWith(selMonth)).reduce((s,t) => s+Math.abs(t.amount), 0);
+
+  // Grand total this month
+  const totalMes = filteredTxs.reduce((s,t) => s+Math.abs(t.amount), 0);
+
+  // By category
+  const byCat = filteredTxs.reduce((acc, t) => {
+    acc[t.category] = (acc[t.category]||0) + Math.abs(t.amount);
+    return acc;
+  }, {});
+
+  // By owner
+  const byOwner = { rodrigo:0, claudia:0, casal:0 };
+  filteredTxs.forEach(t => {
+    const c = cartoes.find(x=>x.id===t.cartaoId);
+    if (c) byOwner[c.owner] = (byOwner[c.owner]||0) + Math.abs(t.amount);
+  });
+
+  const ownerLabel = { rodrigo:"👨 Rodrigo", claudia:"👩 Cláudia", casal:"💑 Casal" };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:18}}>
+
+      {showCartaoForm && <CartaoForm initial={editCartao} onSave={saveCC} onClose={()=>{setShowCC(false);setEditCC(null);}}/>}
+      {showTxForm && <CartaoTxForm cartoes={cartoes} initial={editTx} onSave={saveTx} onClose={()=>{setShowTx(false);setEditTx(null);}}/>}
+
+      {uploadStatus && (
+        <div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:C.text,color:C.card,borderRadius:10,padding:"12px 22px",fontSize:13,fontFamily:"'DM Sans',sans-serif",zIndex:999,boxShadow:"0 4px 20px #0003",whiteSpace:"nowrap",maxWidth:"90vw",textOverflow:"ellipsis",overflow:"hidden"}}>
+          {uploadStatus}
+        </div>
+      )}
+
+      {/* Header com filtros */}
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:18,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <input type="month" style={{...IS,width:150}} value={selMonth} onChange={e=>setSelMonth(e.target.value)}/>
+        <select style={{...IS,flex:"1 1 140px"}} value={selCartao||""} onChange={e=>setSelCartao(e.target.value||null)}>
+          <option value="">💳 Todos os cartões</option>
+          {cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <button onClick={()=>{setEditTx(null);setShowTx(true);}} style={{background:C.gold,color:C.bg,border:"none",borderRadius:8,padding:"9px 16px",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",cursor:"pointer",whiteSpace:"nowrap"}}>
+          + Lançamento
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:4,background:C.card,borderRadius:10,padding:4,border:`1px solid ${C.border}`}}>
+        {[["resumo","📊 Resumo"],["lancamentos","📋 Lançamentos"],["cartoes","💳 Cartões"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{
+            flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
+            background:tab===id?C.gold:"transparent",
+            color:tab===id?C.bg:C.muted,
+            fontSize:13,fontFamily:"'DM Sans',sans-serif",fontWeight:tab===id?600:400,
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* RESUMO */}
+      {tab==="resumo" && (
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {/* Total do mês */}
+          <div style={{background:"linear-gradient(135deg,#1e2535 0%,#2d3550 100%)",borderRadius:16,padding:"22px 24px"}}>
+            <div style={{fontSize:11,color:"#94a3b8",letterSpacing:3,textTransform:"uppercase",fontFamily:"'DM Sans',sans-serif",marginBottom:6}}>Total em cartões — {MONTHS[parseInt(selMonth.split("-")[1])-1]}</div>
+            <div style={{fontSize:38,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:"#f0c060",lineHeight:1}}>{brl(totalMes)}</div>
+          </div>
+
+          {/* Por pessoa */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
+            {Object.entries(byOwner).filter(([,v])=>v>0).map(([owner,val])=>(
+              <div key={owner} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 12px",textAlign:"center"}}>
+                <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:4}}>{ownerLabel[owner]}</div>
+                <div style={{fontSize:16,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.text}}>{brl(val)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Por categoria */}
+          {Object.keys(byCat).length > 0 && (
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:20}}>
+              <div style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Por categoria</div>
+              {Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([catId, val])=>{
+                const cat = DEFAULT_CATEGORIES.find(c=>c.id===catId)||DEFAULT_CATEGORIES.at(-1);
+                const pct = Math.round(val/totalMes*100);
+                return (
+                  <div key={catId} style={{marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <span style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif"}}>{cat.icon} {cat.label}</span>
+                      <span style={{fontSize:13,fontFamily:"'DM Sans',sans-serif",color:C.text}}>{brl(val)} <span style={{color:C.muted,fontSize:11}}>({pct}%)</span></span>
+                    </div>
+                    <div style={{height:6,background:C.border,borderRadius:6}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:cat.color,borderRadius:6,transition:"width .4s"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Por cartão */}
+          {cartoes.length > 0 && (
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {cartoes.map(c=>{
+                const gasto = gastoByCartao(c.id);
+                const pctUsado = c.limite > 0 ? Math.min(gasto/c.limite*100, 100) : 0;
+                const limDisp = c.limiteDisponivel ?? (c.limite > 0 ? c.limite - gasto : null);
+                return (
+                  <div key={c.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:20}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        <div style={{width:42,height:28,borderRadius:6,background:c.cor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700,fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>{c.bandeira.slice(0,4).toUpperCase()}</div>
+                        <div>
+                          <div style={{fontSize:14,color:C.text,fontWeight:500,fontFamily:"'DM Sans',sans-serif"}}>{c.nome}</div>
+                          <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>{ownerLabel[c.owner]} · Vence dia {c.vencimento||"?"}</div>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:18,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.red}}>{brl(gasto)}</div>
+                        <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>gasto este mês</div>
+                      </div>
+                    </div>
+                    {c.limite > 0 && (
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                          <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Limite usado: {brl(gasto)} / {brl(c.limite)}</span>
+                          <span style={{fontSize:12,fontFamily:"'DM Sans',sans-serif",color:pctUsado>80?C.red:pctUsado>60?C.gold:C.green}}>{Math.round(pctUsado)}%</span>
+                        </div>
+                        <div style={{height:8,background:C.border,borderRadius:8}}>
+                          <div style={{height:"100%",width:`${pctUsado}%`,background:pctUsado>80?C.red:pctUsado>60?C.gold:C.green,borderRadius:8,transition:"width .5s"}}/>
+                        </div>
+                        {limDisp !== null && (
+                          <div style={{marginTop:6,fontSize:12,color:C.green,fontFamily:"'DM Sans',sans-serif"}}>
+                            💳 Limite disponível: {brl(limDisp)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Upload buttons */}
+                    <div style={{display:"flex",gap:8,marginTop:14}}>
+                      <label style={{flex:1,background:C.border,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"8px",fontSize:12,fontFamily:"'DM Sans',sans-serif",cursor:"pointer",textAlign:"center",display:"block"}}>
+                        📄 Subir fatura
+                        <input type="file" accept=".pdf" style={{display:"none"}} onChange={e=>handleFaturaUpload(e,c.id)} disabled={uploading}/>
+                      </label>
+                      <label style={{flex:1,background:C.border,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"8px",fontSize:12,fontFamily:"'DM Sans',sans-serif",cursor:"pointer",textAlign:"center",display:"block"}}>
+                        🧾 Subir comprovante
+                        <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{display:"none"}} onChange={e=>handleComprovanteUpload(e,c.id)} disabled={uploading}/>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LANÇAMENTOS */}
+      {tab==="lancamentos" && (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {filteredTxs.length===0 && (
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"40px",textAlign:"center",color:C.muted,fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
+              Nenhum lançamento. Toque em + para adicionar.
+            </div>
+          )}
+          {filteredTxs.map(t=>{
+            const cat = DEFAULT_CATEGORIES.find(c=>c.id===t.category)||DEFAULT_CATEGORIES.at(-1);
+            const cc = cartoes.find(c=>c.id===t.cartaoId);
+            return (
+              <div key={t.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:22,flexShrink:0}}>{cat.icon}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif",fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.description}</div>
+                  <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
+                    {new Date(t.date+"T12:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}
+                    {cc && <> · <span style={{color:cc.cor}}>●</span> {cc.nome}</>}
+                    · <span style={{color:cat.color}}>{cat.label}</span>
+                  </div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                  <div style={{fontSize:15,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.red}}>{brl(Math.abs(t.amount))}</div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>{setEditTx(t);setShowTx(true);}} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>✏️</button>
+                    <button onClick={()=>deleteTx(t.id)} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>🗑️</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* GESTÃO DE CARTÕES */}
+      {tab==="cartoes" && (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <button onClick={()=>{setEditCC(null);setShowCC(true);}} style={{background:C.gold,color:C.bg,border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>
+              + Novo cartão
+            </button>
+          </div>
+          {cartoes.length===0 && (
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"40px",textAlign:"center",color:C.muted,fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
+              Nenhum cartão cadastrado. Toque em + Novo cartão para começar.
+            </div>
+          )}
+          {cartoes.map(c=>(
+            <div key={c.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:20,display:"flex",alignItems:"center",gap:14}}>
+              <div style={{width:50,height:32,borderRadius:8,background:c.cor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#fff",fontWeight:700,fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>{c.bandeira.slice(0,4).toUpperCase()}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,color:C.text,fontWeight:500,fontFamily:"'DM Sans',sans-serif"}}>{c.nome}</div>
+                <div style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
+                  {ownerLabel[c.owner]} · {c.bandeira}
+                  {c.limite>0 && ` · Limite: ${brl(c.limite)}`}
+                  {c.vencimento && ` · Vence dia ${c.vencimento}`}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>{setEditCC(c);setShowCC(true);}} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:7,padding:"5px 10px",fontSize:13,cursor:"pointer"}}>✏️</button>
+                <button onClick={()=>deleteCC(c.id)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:7,padding:"5px 10px",fontSize:13,cursor:"pointer"}}>🗑️</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser]         = useState(() => { try { return JSON.parse(localStorage.getItem("sb_user")); } catch { return null; } });
@@ -2678,6 +3269,7 @@ export default function App() {
     { id:"extrato",     label:"Extrato",      icon:"≡" },
     { id:"relatorios",  label:"Relatórios",   icon:"📊" },
     { id:"carteira",    label:"Carteira",     icon:"👜" },
+    { id:"cartoes",     label:"Cartões",      icon:"💳" },
     { id:"dividas",     label:"Dívidas",      icon:"📉" },
     { id:"metas",       label:"Metas",        icon:"🎯" },
     { id:"importar",    label:"Importar",     icon:"↑"  },
@@ -2687,15 +3279,15 @@ export default function App() {
 
   const pageTitle = {
     dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios",
-    carteira:"Carteira", dividas:"Dívidas & Financiamentos", metas:"Metas",
-    importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas"
+    carteira:"Carteira", cartoes:"Cartões de Crédito", dividas:"Dívidas & Financiamentos",
+    metas:"Metas", importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas"
   };
 
   const bottomNav = [
     { id:"dashboard",  label:"Início",    icon:"◈" },
     { id:"extrato",    label:"Extrato",   icon:"≡" },
+    { id:"cartoes",    label:"Cartões",   icon:"💳" },
     { id:"carteira",   label:"Carteira",  icon:"👜" },
-    { id:"dividas",    label:"Dívidas",   icon:"📉" },
     { id:"mais",       label:"Mais",      icon:"☰"  },
   ];
 
@@ -2817,6 +3409,7 @@ export default function App() {
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} />}
+              {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
               {nav==="metas"        && <Metas        transactions={transactions} />}
               {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} allTxs={transactions} />}
