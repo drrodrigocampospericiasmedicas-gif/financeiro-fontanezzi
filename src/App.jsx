@@ -56,14 +56,23 @@ const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Cormorant+G
 // ─── CATEGORIES ───────────────────────────────────────────────────────────────
 const DEFAULT_CATEGORIES = [
   { id: "alimentacao",   label: "Alimentação",   icon: "🍽️", color: "#e08c4c" },
+  { id: "padaria",       label: "Padaria",       icon: "🥖",  color: "#d4a843" },
   { id: "supermercado",  label: "Supermercado",  icon: "🛒",  color: "#f39c12" },
   { id: "restaurante",   label: "Restaurante",   icon: "🍴",  color: "#e67e22" },
   { id: "farmacia",      label: "Farmácia",      icon: "💊",  color: "#2ecc71" },
   { id: "transporte",    label: "Transporte",    icon: "🚗",  color: "#4c8ec9" },
+  { id: "gasolina",      label: "Gasolina",      icon: "⛽",  color: "#e67e22" },
+  { id: "aluguel_carro", label: "Aluguel Carro", icon: "🚙",  color: "#2980b9" },
   { id: "saude",         label: "Saúde",         icon: "🏥",  color: "#4caf82" },
   { id: "educacao",      label: "Educação",      icon: "📚",  color: "#9b59b6" },
   { id: "lazer",         label: "Lazer",         icon: "🎭",  color: "#e05c9b" },
   { id: "moradia",       label: "Moradia",       icon: "🏠",  color: "#c9a84c" },
+  { id: "aluguel",       label: "Aluguel",       icon: "🔑",  color: "#8e6b3e" },
+  { id: "condominio",    label: "Condomínio",    icon: "🏢",  color: "#7f8c8d" },
+  { id: "agua",          label: "Água",          icon: "💧",  color: "#3498db" },
+  { id: "luz",           label: "Luz",           icon: "💡",  color: "#f1c40f" },
+  { id: "celular",       label: "Celular (Casal)",icon: "📱", color: "#1abc9c" },
+  { id: "celular_daniel",label: "Celular Daniel", icon: "📲", color: "#16a085" },
   { id: "vestuario",     label: "Vestuário",     icon: "👔",  color: "#5cc9e0" },
   { id: "financeiro",    label: "Financeiro",    icon: "💳",  color: "#e05c5c" },
   { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
@@ -317,7 +326,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
 
 async function classifyTx(description) {
   const text = await callClaude(
-    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, transferencia, receita, outros\n\nDicas: supermercado=mercado/carrefour/extra, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário, divida=parcela/financiamento/empréstimo/boleto de dívida, taxas=tarifa bancária/IOF/taxa/pacote banco\n\nResponda apenas o id:`
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, padaria, supermercado, restaurante, farmacia, transporte, gasolina, aluguel_carro, saude, educacao, lazer, moradia, aluguel, condominio, agua, luz, celular, celular_daniel, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, transferencia, receita, outros\n\nDicas: padaria=padaria/pão/bakery, gasolina=posto/combustível, aluguel_carro=locadora/hertz/localiza, aluguel=aluguel imóvel, condominio=condomínio, agua=saneamento/cedae/sabesp, luz=energia/enel/cemig/light, celular=tim/claro/vivo/oi celular casal, celular_daniel=celular daniel/filho, supermercado=mercado/carrefour, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
   );
   const id = text.trim().toLowerCase();
   return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
