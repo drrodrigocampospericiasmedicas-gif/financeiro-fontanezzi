@@ -184,7 +184,7 @@ async function dbFrom(table) {
 
   return {
     async select(q = "*", extra = "") {
-      const r = await fetch(`${base}?select=${q}&order=date.desc${extra}`, { headers: getHdrs() });
+      const r = await fetch(`${base}?select=${q}${extra}`, { headers: getHdrs() });
       if (!r.ok) { const e = await r.text(); console.error(`select ${table}:`, r.status, e); return { data: [], error: e }; }
       return { data: await r.json() };
     },
@@ -1793,37 +1793,11 @@ const ContasView = ({ accounts, setAccounts }) => {
     const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
     const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
     setAccounts(next);
-
-    const { url, key } = getSBCreds();
-    const token = localStorage.getItem("sb_token");
-
-    // Direct fetch for better error visibility
-    try {
-      const endpoint = `${url}/rest/v1/accounts`;
-      const method = editAcc ? "PATCH" : "POST";
-      const fullUrl = editAcc ? `${endpoint}?id=eq.${acc.id}` : endpoint;
-
-      const r = await fetch(fullUrl, {
-        method,
-        headers: {
-          "apikey": key,
-          "Authorization": `Bearer ${token || key}`,
-          "Content-Type": "application/json",
-          "Prefer": "return=representation"
-        },
-        body: JSON.stringify(acc)
-      });
-
-      if (!r.ok) {
-        const errText = await r.text();
-        alert(`❌ Erro ${r.status} ao salvar conta:\n${errText}\n\nToken: ${token ? "✅ presente" : "❌ ausente"}`);
-        return;
-      }
-      alert("✅ Conta salva no Supabase!");
-    } catch(e) {
-      alert(`❌ Erro de rede: ${e.message}`);
+    const tbl = await dbFrom("accounts");
+    if (tbl) {
+      if (editAcc) await tbl.update(acc, { id: acc.id });
+      else await tbl.insert(acc);
     }
-
     setShowForm(false); setEditAcc(null);
   };
 
@@ -3180,8 +3154,8 @@ export default function App() {
     }
     setLoading(true);
     Promise.all([
-      dbFrom("transactions").then(t => t?.select("*")),
-      dbFrom("accounts").then(t => t?.select("*")),
+      dbFrom("transactions").then(t => t?.select("*", "&order=date.desc")),
+      dbFrom("accounts").then(t => t?.select("*", "&order=created_at.asc")),
     ]).then(([txRes, accRes]) => {
       const txs = (txRes?.data || []).map(t => ({
         id: t.id,
