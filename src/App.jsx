@@ -213,6 +213,7 @@ async function dbFrom(table) {
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const TODAY = new Date();
 const fmt   = (d) => d.toISOString().split("T")[0];
+const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 const daysAgo = (n) => { const d = new Date(TODAY); d.setDate(d.getDate() - n); return fmt(d); };
 
 // Generate rich 6-month historical mock data for reports
@@ -1795,8 +1796,13 @@ const ContasView = ({ accounts, setAccounts }) => {
     // Save to Supabase
     const tbl = await dbFrom("accounts");
     if (tbl) {
-      if (editAcc) await tbl.update(acc, { id: acc.id });
-      else await tbl.insert(acc);
+      const result = editAcc ? await tbl.update(acc, { id: acc.id }) : await tbl.insert(acc);
+      if (result?.error) {
+        alert("Erro ao salvar: " + result.error);
+        return;
+      }
+    } else {
+      alert("Supabase não conectado — conta salva localmente apenas.");
     }
     setShowForm(false); setEditAcc(null);
   };
