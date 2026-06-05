@@ -1954,37 +1954,50 @@ function saveCashTxs(txs) {
 }
 
 const Carteira = ({ accounts }) => {
-  const [cashTxs, setCashTxs] = useState(() => loadCashTxs());
+  const [cashTxs, setCashTxs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editCash, setEditCash] = useState(null);
   const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" });
   const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const cashBalance = cashTxs.reduce((s, t) => s + t.amount, 0);
-  const cashRodrigo = cashTxs.filter(t=>t.owner==="rodrigo"||!t.owner).reduce((s,t)=>s+t.amount,0);
-  const cashClaudia = cashTxs.filter(t=>t.owner==="claudia").reduce((s,t)=>s+t.amount,0);
+  // Load cash transactions from Supabase
+  useEffect(() => {
+    dbFrom("cash_transactions").then(tbl => {
+      if (tbl) tbl.select("*", "&order=date.desc").then(res => {
+        if (res?.data?.length) setCashTxs(res.data);
+      });
+    });
+  }, []);
+
+  const cashBalance = cashTxs.reduce((s, t) => s + parseFloat(t.amount||0), 0);
+  const cashRodrigo = cashTxs.filter(t=>t.owner==="rodrigo"||!t.owner).reduce((s,t)=>s+parseFloat(t.amount||0),0);
+  const cashClaudia = cashTxs.filter(t=>t.owner==="claudia").reduce((s,t)=>s+parseFloat(t.amount||0),0);
   const accountsTotal = accounts.reduce((s, a) => s + a.balance, 0);
   const grandTotal = accountsTotal + cashBalance;
 
   const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
-  const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: tx.amount >= 0 ? "entrada" : "saida", amount: Math.abs(tx.amount).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
+  const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: parseFloat(tx.amount) >= 0 ? "entrada" : "saida", amount: Math.abs(parseFloat(tx.amount)).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.description.trim() || !form.amount) return;
     const amt = parseFloat(form.amount.replace(",", "."));
     if (isNaN(amt)) return;
     const tx = { ...form, id: editCash?.id || ("cash_" + Date.now()), amount: form.type === "entrada" ? Math.abs(amt) : -Math.abs(amt) };
-    const next = editCash
-      ? cashTxs.map(t => t.id === tx.id ? tx : t)
-      : [tx, ...cashTxs];
+    const next = editCash ? cashTxs.map(t => t.id === tx.id ? tx : t) : [tx, ...cashTxs];
     setCashTxs(next);
-    saveCashTxs(next);
+    // Save to Supabase
+    const tbl = await dbFrom("cash_transactions");
+    if (tbl) {
+      if (editCash) await tbl.update(tx, { id: tx.id });
+      else await tbl.insert(tx);
+    }
     setShowForm(false); setEditCash(null);
   };
 
-  const handleDelete = (id) => {
-    const next = cashTxs.filter(t => t.id !== id);
-    setCashTxs(next); saveCashTxs(next);
+  const handleDelete = async (id) => {
+    setCashTxs(prev => prev.filter(t => t.id !== id));
+    const tbl = await dbFrom("cash_transactions");
+    if (tbl) await tbl.del({ id });
   };
 
   // group accounts by owner for display
