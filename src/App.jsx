@@ -1802,10 +1802,30 @@ const ContasView = ({ accounts, setAccounts }) => {
     const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
     const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
     setAccounts(next);
-    const tbl = await dbFrom("accounts");
-    if (tbl) {
-      if (editAcc) await tbl.update(acc, { id: acc.id });
-      else await tbl.insert(acc);
+
+    // Test save with full error reporting
+    const { url, key } = getSBCreds();
+    const token = localStorage.getItem("sb_token");
+    try {
+      const endpoint = editAcc
+        ? `${url}/rest/v1/accounts?id=eq.${acc.id}`
+        : `${url}/rest/v1/accounts`;
+      const r = await fetch(endpoint, {
+        method: editAcc ? "PATCH" : "POST",
+        headers: {
+          "apikey": key,
+          "Authorization": `Bearer ${token || key}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=representation"
+        },
+        body: JSON.stringify(acc)
+      });
+      const txt = await r.text();
+      if (!r.ok) {
+        alert(`ERRO ${r.status}:\n${txt}\n\nToken: ${token ? token.slice(0,20)+"..." : "AUSENTE"}\nURL: ${url}`);
+      }
+    } catch(e) {
+      alert(`ERRO REDE: ${e.message}`);
     }
     setShowForm(false); setEditAcc(null);
   };
