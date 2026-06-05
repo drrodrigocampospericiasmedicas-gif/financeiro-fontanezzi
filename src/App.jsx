@@ -3155,12 +3155,22 @@ export default function App() {
     }
   }, []);
 
-  // Load data from Supabase when user logs in
+  // Load data from Supabase on mount and when user changes
   useEffect(() => {
-    if (!user) {
-      setTxs(sbConnected ? [] : MOCK_TXS);
+    const token = localStorage.getItem("sb_token");
+    const savedUser = localStorage.getItem("sb_user");
+
+    // If we have a token but user state is null, restore user from localStorage
+    if (!user && token && savedUser) {
+      try { setUser(JSON.parse(savedUser)); } catch {}
+      return; // will re-run when user state updates
+    }
+
+    if (!user && !token) {
+      setTxs(MOCK_TXS);
       return;
     }
+
     setLoading(true);
     Promise.all([
       dbFrom("transactions").then(t => t?.select("*", "&order=date.desc")),
@@ -3177,17 +3187,15 @@ export default function App() {
         internalTransfer: t.internal_transfer || t.internalTransfer || false,
       }));
       setTxs(txs);
-      if (!txs.length) showToast(`Nenhuma transação encontrada no Supabase. Importe um extrato.`, "warn");
       if (accRes?.data?.length) {
         const accs = accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
         setAccounts(accs);
       } else {
-        setAccounts([]); // no accounts yet — start fresh
+        setAccounts([]);
       }
       setLoading(false);
     }).catch(err => {
-      showToast(`Erro ao carregar dados: ${err.message}`, "warn");
-      setTxs([]);
+      console.error("Load error:", err);
       setLoading(false);
     });
   }, [user]);
