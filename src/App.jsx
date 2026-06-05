@@ -1957,15 +1957,17 @@ const Carteira = ({ accounts }) => {
   const [cashTxs, setCashTxs] = useState(() => loadCashTxs());
   const [showForm, setShowForm] = useState(false);
   const [editCash, setEditCash] = useState(null);
-  const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "" });
+  const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" });
   const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const cashBalance = cashTxs.reduce((s, t) => s + t.amount, 0);
+  const cashRodrigo = cashTxs.filter(t=>t.owner==="rodrigo"||!t.owner).reduce((s,t)=>s+t.amount,0);
+  const cashClaudia = cashTxs.filter(t=>t.owner==="claudia").reduce((s,t)=>s+t.amount,0);
   const accountsTotal = accounts.reduce((s, a) => s + a.balance, 0);
   const grandTotal = accountsTotal + cashBalance;
 
-  const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "" }); setEditCash(null); setShowForm(true); };
-  const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: tx.amount >= 0 ? "entrada" : "saida", amount: Math.abs(tx.amount).toString() }); setShowForm(true); };
+  const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
+  const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: tx.amount >= 0 ? "entrada" : "saida", amount: Math.abs(tx.amount).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
 
   const handleSave = () => {
     if (!form.description.trim() || !form.amount) return;
@@ -2102,6 +2104,7 @@ const Carteira = ({ accounts }) => {
               <div style={{ fontSize: 30, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: cashBalance >= 0 ? C.green : C.red, lineHeight: 1 }}>
                 {brl(cashBalance)}
               </div>
+              <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>total somado</div>
             </div>
             <button onClick={openNew} style={{
               background: C.gold, color: C.bg, border: "none", borderRadius: 8,
@@ -2109,13 +2112,14 @@ const Carteira = ({ accounts }) => {
             }}>+ Lançar</button>
           </div>
 
-          {/* Quick stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: `1px solid ${C.border}` }}>
+          {/* Por pessoa */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderBottom: `1px solid ${C.border}` }}>
             {[
-              ["Entradas", cashTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0), C.green],
-              ["Saídas",   cashTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0), C.red],
-            ].map(([label, val, col]) => (
-              <div key={label} style={{ padding: "12px 20px", borderRight: label==="Entradas"?`1px solid ${C.border}`:"none" }}>
+              ["👨 Rodrigo", cashRodrigo, C.blue],
+              ["👩 Cláudia", cashClaudia, C.purple],
+              ["Total", cashBalance, cashBalance >= 0 ? C.green : C.red],
+            ].map(([label, val, col], i) => (
+              <div key={label} style={{ padding: "12px 14px", borderRight: i < 2 ? `1px solid ${C.border}` : "none" }}>
                 <div style={{ fontSize: 10, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginBottom: 3 }}>{label}</div>
                 <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{brl(val)}</div>
               </div>
@@ -2132,6 +2136,7 @@ const Carteira = ({ accounts }) => {
             )}
             {recentCash.map((t, i) => {
               const cat = catOf(t.category);
+              const ownerIcon = t.owner === "claudia" ? "👩" : "👨";
               return (
                 <div key={t.id}>
                   {i > 0 && <div style={{ height: 1, background: C.border }} />}
@@ -2139,7 +2144,7 @@ const Carteira = ({ accounts }) => {
                     <div style={{ fontSize: 18 }}>{cat.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.description}</div>
-                      <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{fdate(t.date)} · {cat.label}</div>
+                      <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{fdate(t.date)} · {ownerIcon} · {cat.label}</div>
                     </div>
                     <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: t.amount > 0 ? C.green : C.text, minWidth: 80, textAlign: "right" }}>
                       {t.amount > 0 ? "+" : ""}{brl(t.amount)}
@@ -2188,6 +2193,20 @@ const Carteira = ({ accounts }) => {
                 <div>
                   <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>DATA</div>
                   <input type="date" style={IS} value={form.date} onChange={e=>sf("date",e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>DE QUEM</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["rodrigo","👨 Rodrigo"],["claudia","👩 Cláudia"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>sf("owner",v)} style={{
+                      flex:1, padding:"9px", borderRadius:8, fontSize:13,
+                      fontFamily:"'DM Sans',sans-serif", cursor:"pointer", fontWeight:500,
+                      background: form.owner===v ? C.blue+"22" : "transparent",
+                      border: `1px solid ${form.owner===v ? C.blue : C.border}`,
+                      color: form.owner===v ? C.blue : C.muted
+                    }}>{l}</button>
+                  ))}
                 </div>
               </div>
               <div>
