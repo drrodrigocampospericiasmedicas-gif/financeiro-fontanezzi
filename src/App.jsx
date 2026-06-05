@@ -131,10 +131,31 @@ async function sbSignIn(email, password) {
   const d = await r.json();
   if (r.ok) {
     localStorage.setItem("sb_token", d.access_token);
+    localStorage.setItem("sb_refresh_token", d.refresh_token || "");
     localStorage.setItem("sb_user", JSON.stringify({ email, id: d.user?.id }));
     return { data: d };
   }
   return { error: d.error_description || d.msg || "E-mail ou senha incorretos" };
+}
+
+async function sbRefreshToken() {
+  const { url, key } = getSBCreds();
+  const refresh_token = localStorage.getItem("sb_refresh_token");
+  if (!url || !refresh_token) return false;
+  try {
+    const r = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "apikey": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token })
+    });
+    const d = await r.json();
+    if (r.ok && d.access_token) {
+      localStorage.setItem("sb_token", d.access_token);
+      localStorage.setItem("sb_refresh_token", d.refresh_token || refresh_token);
+      return true;
+    }
+  } catch(e) {}
+  return false;
 }
 
 async function sbSignInGoogle() {
@@ -198,14 +219,16 @@ async function dbFrom(table) {
       return { data: await r.json() };
     },
     async insert(row) {
-      const r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
+      let r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
+      if (r.status === 401) { await sbRefreshToken(); r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) }); }
       if (!r.ok) { const e = await r.text(); console.error(`insert ${table}:`, r.status, e); return { error: e }; }
       const text = await r.text();
       return { data: text ? JSON.parse(text) : {} };
     },
     async update(row, match) {
       const params = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
-      const r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
+      let r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
+      if (r.status === 401) { await sbRefreshToken(); r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) }); }
       if (!r.ok) { const e = await r.text(); console.error(`update ${table}:`, r.status, e); return { error: e }; }
       return { data: {} };
     },
@@ -1802,30 +1825,10 @@ const ContasView = ({ accounts, setAccounts }) => {
     const acc = { ...form, id: editAcc?.id || ("acc_"+Date.now()), balance: bal };
     const next = editAcc ? accounts.map(a=>a.id===acc.id?acc:a) : [...accounts, acc];
     setAccounts(next);
-
-    // Test save with full error reporting
-    const { url, key } = getSBCreds();
-    const token = localStorage.getItem("sb_token");
-    try {
-      const endpoint = editAcc
-        ? `${url}/rest/v1/accounts?id=eq.${acc.id}`
-        : `${url}/rest/v1/accounts`;
-      const r = await fetch(endpoint, {
-        method: editAcc ? "PATCH" : "POST",
-        headers: {
-          "apikey": key,
-          "Authorization": `Bearer ${token || key}`,
-          "Content-Type": "application/json",
-          "Prefer": "return=representation"
-        },
-        body: JSON.stringify(acc)
-      });
-      const txt = await r.text();
-      if (!r.ok) {
-        alert(`ERRO ${r.status}:\n${txt}\n\nToken: ${token ? token.slice(0,20)+"..." : "AUSENTE"}\nURL: ${url}`);
-      }
-    } catch(e) {
-      alert(`ERRO REDE: ${e.message}`);
+    const tbl = await dbFrom("accounts");
+    if (tbl) {
+      if (editAcc) await tbl.update(acc, { id: acc.id });
+      else await tbl.insert(acc);
     }
     setShowForm(false); setEditAcc(null);
   };
