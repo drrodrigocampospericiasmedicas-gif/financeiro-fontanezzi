@@ -3249,27 +3249,34 @@ export default function App() {
     }
 
     setLoading(true);
+
+    // Try to refresh token first if we have refresh_token
+    const refreshTok = localStorage.getItem("sb_refresh_token");
+    if (refreshTok) await sbRefreshToken();
+
     Promise.all([
       dbFrom("transactions").then(t => t?.select("*", "&order=date.desc")),
       dbFrom("accounts").then(t => t?.select("*", "&order=created_at.asc")),
     ]).then(([txRes, accRes]) => {
-      const txs = (txRes?.data || []).map(t => ({
-        id: t.id,
-        accountId: t.account_id || t.accountId,
-        date: t.date,
-        description: t.description,
-        amount: parseFloat(t.amount),
-        category: t.category || "outros",
-        notes: t.notes || "",
-        internalTransfer: t.internal_transfer || t.internalTransfer || false,
-      }));
-      setTxs(txs);
+      // Only update if we got actual data back (not error)
+      if (txRes?.data) {
+        const txs = txRes.data.map(t => ({
+          id: t.id,
+          accountId: t.account_id || t.accountId,
+          date: t.date,
+          description: t.description,
+          amount: parseFloat(t.amount),
+          category: t.category || "outros",
+          notes: t.notes || "",
+          internalTransfer: t.internal_transfer || t.internalTransfer || false,
+        }));
+        setTxs(txs);
+      }
       if (accRes?.data?.length) {
         const accs = accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
         setAccounts(accs);
-      } else {
-        setAccounts([]);
       }
+      // Don't clear data if query returned nothing — might be a temp error
       setLoading(false);
     }).catch(err => {
       console.error("Load error:", err);
