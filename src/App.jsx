@@ -3314,6 +3314,7 @@ export default function App() {
 
   const saveTx = async (tx) => {
     const existingTx = transactions.find(t=>t.id===tx.id);
+    console.log("[saveTx] tx:", tx, "| existingTx:", existingTx, "| accounts:", accounts.map(a=>({id:a.id,name:a.name,balance:a.balance})));
     setTxs(ts => { const i = ts.findIndex(t=>t.id===tx.id); return i>=0 ? ts.map((t,idx)=>idx===i?tx:t) : [tx,...ts]; });
 
     // Atualizar saldo da conta afetada
@@ -3322,13 +3323,18 @@ export default function App() {
         ? (parseFloat(tx.amount) - parseFloat(existingTx.amount))  // edição: só a diferença
         : parseFloat(tx.amount);                                    // novo: valor inteiro
       if (amtDelta !== 0) {
-        setAccounts(accs => accs.map(a => {
-          if (a.id !== tx.accountId) return a;
-          const newBal = (parseFloat(a.balance) || 0) + amtDelta;
-          // Salvar no Supabase em background
-          dbFrom("accounts").then(t => t?.update({ balance: newBal }, { id: a.id }));
-          return { ...a, balance: newBal };
-        }));
+        setAccounts(accs => {
+          const updated = accs.map(a => {
+            if (a.id !== tx.accountId) return a;
+            return { ...a, balance: (parseFloat(a.balance) || 0) + amtDelta };
+          });
+          // Salvar no Supabase — só o campo balance, fora do map para pegar o valor calculado
+          const acc = updated.find(a => a.id === tx.accountId);
+          if (acc) {
+            dbFrom("accounts").then(tbl => tbl?.update({ balance: acc.balance }, { id: acc.id }));
+          }
+          return updated;
+        });
       }
     }
 
@@ -3356,12 +3362,17 @@ export default function App() {
     const tx = transactions.find(t=>t.id===id);
     if (tx?.accountId && tx?.amount) {
       const revert = -parseFloat(tx.amount);
-      setAccounts(accs => accs.map(a => {
-        if (a.id !== tx.accountId) return a;
-        const newBal = (parseFloat(a.balance) || 0) + revert;
-        dbFrom("accounts").then(t => t?.update({ balance: newBal }, { id: a.id }));
-        return { ...a, balance: newBal };
-      }));
+      setAccounts(accs => {
+        const updated = accs.map(a => {
+          if (a.id !== tx.accountId) return a;
+          return { ...a, balance: (parseFloat(a.balance) || 0) + revert };
+        });
+        const acc = updated.find(a => a.id === tx.accountId);
+        if (acc) {
+          dbFrom("accounts").then(tbl => tbl?.update({ balance: acc.balance }, { id: acc.id }));
+        }
+        return updated;
+      });
     }
     setTxs(ts=>ts.filter(t=>t.id!==id));
     const tbl = await dbFrom("transactions");
