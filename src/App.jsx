@@ -1960,11 +1960,33 @@ const Carteira = ({ accounts }) => {
   const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" });
   const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Load cash transactions from Supabase
+  // Load cash transactions from Supabase, fallback to localStorage
   useEffect(() => {
     dbFrom("cash_transactions").then(tbl => {
-      if (tbl) tbl.select("*", "&order=date.desc").then(res => {
-        if (res?.data?.length) setCashTxs(res.data);
+      if (!tbl) {
+        // No Supabase — use localStorage
+        try { setCashTxs(JSON.parse(localStorage.getItem("fontanezzi_cash_txs")) || []); } catch {}
+        return;
+      }
+      tbl.select("*", "&order=date.desc").then(res => {
+        if (res?.data?.length) {
+          setCashTxs(res.data);
+        } else {
+          // Supabase empty — migrate from localStorage if exists
+          try {
+            const local = JSON.parse(localStorage.getItem("fontanezzi_cash_txs")) || [];
+            if (local.length) {
+              setCashTxs(local);
+              // Migrate to Supabase
+              Promise.all(local.map(tx => tbl.insert({
+                ...tx,
+                owner: tx.owner || "rodrigo"
+              }))).then(() => {
+                localStorage.removeItem("fontanezzi_cash_txs");
+              });
+            }
+          } catch {}
+        }
       });
     });
   }, []);
