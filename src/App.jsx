@@ -925,14 +925,14 @@ function loadGoals() { try { return JSON.parse(localStorage.getItem(GOALS_KEY)) 
 function saveGoals(g) { localStorage.setItem(GOALS_KEY, JSON.stringify(g)); }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-const Dashboard = ({ transactions, accounts, onNavigate }) => {
+const Dashboard = ({ transactions, accounts, onNavigate, cashBal: cashBalProp }) => {
   const month    = fmt(TODAY).slice(0,7);
   const thisM    = transactions.filter(t => t.date.startsWith(month));
   const receitas = thisM.filter(t=>t.amount>0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
   const despesas = thisM.filter(t=>t.amount<0&&!t.internalTransfer).reduce((s,t)=>s+t.amount,0);
   const total    = accounts.reduce((s,a)=>s+a.balance,0);
   const invest   = accounts.filter(a=>a.type==="investimento").reduce((s,a)=>s+a.balance,0);
-  const cashBal  = (() => { try { return (JSON.parse(localStorage.getItem(CASH_STORAGE_KEY))||[]).reduce((s,t)=>s+t.amount,0); } catch { return 0; } })();
+  const cashBal  = cashBalProp ?? 0;
 
   const byCat = {};
   thisM.filter(t=>t.amount<0&&!t.internalTransfer).forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
@@ -1953,7 +1953,7 @@ function saveCashTxs(txs) {
   localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(txs));
 }
 
-const Carteira = ({ accounts }) => {
+const Carteira = ({ accounts, onCashChange }) => {
   const [cashTxs, setCashTxs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editCash, setEditCash] = useState(null);
@@ -2014,10 +2014,12 @@ const Carteira = ({ accounts }) => {
       else await tbl.insert(tx);
     }
     setShowForm(false); setEditCash(null);
+    if (onCashChange) onCashChange();
   };
 
   const handleDelete = async (id) => {
     setCashTxs(prev => prev.filter(t => t.id !== id));
+    if (onCashChange) onCashChange();
     const tbl = await dbFrom("cash_transactions");
     if (tbl) await tbl.del({ id });
   };
@@ -3219,7 +3221,18 @@ export default function App() {
   const [toast, setToast]       = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading]   = useState(false);
+  const [cashBal, setCashBal]   = useState(0);
   const sbConnected = true; // credentials hardcoded
+
+  const refreshCashBal = async () => {
+    const tbl = await dbFrom("cash_transactions");
+    if (!tbl) return;
+    const res = await tbl.select("*", "&order=date.desc");
+    if (res?.data) {
+      const total = res.data.reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+      setCashBal(total);
+    }
+  };
 
   const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
@@ -3255,7 +3268,8 @@ export default function App() {
       Promise.all([
         dbFrom("transactions").then(t => t?.select("*", "&order=date.desc")),
         dbFrom("accounts").then(t => t?.select("*", "&order=created_at.asc")),
-      ]).then(([txRes, accRes]) => {
+        dbFrom("cash_transactions").then(t => t?.select("*")),
+      ]).then(([txRes, accRes, cashRes]) => {
         if (txRes?.data) {
           const txs = txRes.data.map(t => ({
             id: t.id,
@@ -3272,6 +3286,10 @@ export default function App() {
         if (accRes?.data?.length) {
           const accs = accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
           setAccounts(accs);
+        }
+        if (cashRes?.data) {
+          const total = cashRes.data.reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+          setCashBal(total);
         }
         setLoading(false);
       }).catch(err => {
@@ -3535,10 +3553,10 @@ export default function App() {
                 Carregando dados...
               </div>
             ) : <>
-              {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} />}
+              {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} cashBal={cashBal} />}
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
-              {nav==="carteira"     && <Carteira     accounts={accounts} />}
+              {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
               {nav==="metas"        && <Metas        transactions={transactions} />}
