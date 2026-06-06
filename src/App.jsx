@@ -3214,8 +3214,20 @@ export default function App() {
   const [user, setUser]         = useState(() => { try { return JSON.parse(localStorage.getItem("sb_user")); } catch { return null; } });
   const [nav, setNav]           = useState("dashboard");
   const [showConfig, setConfig] = useState(false);
-  const [transactions, setTxs]  = useState([]);
-  const [accounts, setAccounts] = useState(MOCK_ACCOUNTS); // will be overwritten by Supabase
+  const [transactions, setTxsRaw]  = useState([]);
+  const [accounts, setAccountsRaw] = useState(MOCK_ACCOUNTS); // will be overwritten by Supabase
+  const txsRef  = useRef([]);
+  const accsRef = useRef(MOCK_ACCOUNTS);
+  const setTxs = (val) => {
+    const next = typeof val === 'function' ? val(txsRef.current) : val;
+    txsRef.current = next;
+    setTxsRaw(next);
+  };
+  const setAccounts = (val) => {
+    const next = typeof val === 'function' ? val(accsRef.current) : val;
+    accsRef.current = next;
+    setAccountsRaw(next);
+  };
   const [editTx, setEditTx]     = useState(null);
   const [showForm, setForm]     = useState(false);
   const [toast, setToast]       = useState(null);
@@ -3313,34 +3325,34 @@ export default function App() {
   };
 
   const saveTx = async (tx) => {
-    const existingTx = transactions.find(t=>t.id===tx.id);
-    console.log("[saveTx] tx:", tx, "| existingTx:", existingTx, "| accounts:", accounts.map(a=>({id:a.id,name:a.name,balance:a.balance})));
-    setTxs(ts => { const i = ts.findIndex(t=>t.id===tx.id); return i>=0 ? ts.map((t,idx)=>idx===i?tx:t) : [tx,...ts]; });
+    const existingTx = txsRef.current.find(t=>t.id===tx.id);
 
-    // Atualizar saldo da conta afetada
+    // 1. Atualizar lista de transações
+    setTxs(ts => ts.findIndex(t=>t.id===tx.id) >= 0
+      ? ts.map(t => t.id===tx.id ? tx : t)
+      : [tx, ...ts]);
+
+    // 2. Atualizar saldo da conta afetada
     if (tx.accountId) {
-      const amtDelta = existingTx
-        ? (parseFloat(tx.amount) - parseFloat(existingTx.amount))  // edição: só a diferença
-        : parseFloat(tx.amount);                                    // novo: valor inteiro
-      if (amtDelta !== 0) {
+      const oldAmt = existingTx ? parseFloat(existingTx.amount) : 0;
+      const newAmt = parseFloat(tx.amount);
+      const delta  = newAmt - oldAmt;
+      if (delta !== 0) {
         setAccounts(accs => {
-          const updated = accs.map(a => {
+          const next = accs.map(a => {
             if (a.id !== tx.accountId) return a;
-            return { ...a, balance: (parseFloat(a.balance) || 0) + amtDelta };
+            const newBal = parseFloat(a.balance || 0) + delta;
+            dbFrom("accounts").then(tbl => tbl?.update({ balance: newBal }, { id: a.id }));
+            return { ...a, balance: newBal };
           });
-          // Salvar no Supabase — só o campo balance, fora do map para pegar o valor calculado
-          const acc = updated.find(a => a.id === tx.accountId);
-          if (acc) {
-            dbFrom("accounts").then(tbl => tbl?.update({ balance: acc.balance }, { id: acc.id }));
-          }
-          return updated;
+          return next;
         });
       }
     }
 
     const tbl = await dbFrom("transactions");
     if (tbl) {
-      const dbTx = {
+      const dbTxInsert = {
         id: tx.id,
         account_id: tx.accountId,
         date: tx.date,
@@ -3350,8 +3362,17 @@ export default function App() {
         notes: tx.notes || "",
         internal_transfer: tx.internalTransfer || false,
       };
-      if (existingTx) await tbl.update(dbTx, {id:tx.id});
-      else await tbl.insert(dbTx);
+      const dbTxUpdate = {
+        account_id: tx.accountId,
+        date: tx.date,
+        description: tx.description,
+        amount: tx.amount,
+        category: tx.category,
+        notes: tx.notes || "",
+        internal_transfer: tx.internalTransfer || false,
+      };
+      if (existingTx) await tbl.update(dbTxUpdate, {id:tx.id});
+      else await tbl.insert(dbTxInsert);
     }
     setForm(false); setEditTx(null);
     showToast("Lançamento salvo!");
@@ -3359,7 +3380,7 @@ export default function App() {
 
   const deleteTx = async (id) => {
     // Reverter o valor no saldo da conta antes de deletar
-    const tx = transactions.find(t=>t.id===id);
+    const tx = txsRef.current.find(t=>t.id===id);
     if (tx?.accountId && tx?.amount) {
       const revert = -parseFloat(tx.amount);
       setAccounts(accs => {
