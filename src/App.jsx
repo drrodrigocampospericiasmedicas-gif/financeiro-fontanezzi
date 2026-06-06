@@ -138,6 +138,25 @@ async function sbSignIn(email, password) {
   return { error: d.error_description || d.msg || "E-mail ou senha incorretos" };
 }
 
+// Verifica se o JWT está expirado ou vai expirar em breve (< 60s)
+function isTokenExpired() {
+  try {
+    const token = localStorage.getItem("sb_token");
+    if (!token) return true;
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    const exp = payload.exp * 1000; // converter para ms
+    return Date.now() > exp - 60000; // expirado ou expira em menos de 60s
+  } catch { return true; }
+}
+
+// Garante token válido antes de qualquer operação
+async function ensureValidToken() {
+  if (isTokenExpired()) {
+    return await sbRefreshToken();
+  }
+  return true;
+}
+
 async function sbRefreshToken() {
   const { url, key } = getSBCreds();
   const refresh_token = localStorage.getItem("sb_refresh_token");
@@ -205,6 +224,11 @@ async function dbFrom(table) {
   if (!url || !key) return null;
   const base = `${url}/rest/v1/${table}`;
 
+  // Garantir token válido antes de qualquer operação
+  if (localStorage.getItem("sb_token")) {
+    await ensureValidToken();
+  }
+
   const getHdrs = () => {
     const token = localStorage.getItem("sb_token");
     // Always use user JWT if available — required for RLS policies
@@ -257,7 +281,12 @@ async function dbFrom(table) {
     },
     async del(match) {
       const params = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
-      const r = await fetch(`${base}?${params}`, { method: "DELETE", headers: getHdrs() });
+      let r = await fetch(`${base}?${params}`, { method: "DELETE", headers: getHdrs() });
+      if (r.status === 401) {
+        const ok = await sbRefreshToken();
+        if (ok) r = await fetch(`${base}?${params}`, { method: "DELETE", headers: getHdrs() });
+        else { window._sbSessionExpired = true; return false; }
+      }
       if (!r.ok) { const e = await r.text(); console.error(`delete ${table}:`, r.status, e); }
       return r.ok;
     }
@@ -3446,6 +3475,7 @@ export default function App() {
   };
 
   const deleteTx = async (id) => {
+    if (!window.confirm("Excluir este lançamento?")) return;
     // Reverter o valor no saldo da conta antes de deletar
     const tx = txsRef.current.find(t=>t.id===id);
     if (tx?.accountId && tx?.amount) {
