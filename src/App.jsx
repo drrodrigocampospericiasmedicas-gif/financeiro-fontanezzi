@@ -3325,11 +3325,28 @@ export default function App() {
   };
 
   const importTxs = async (rows, accountId, saldoFinal) => {
-    const deduped = rows.filter(r => !transactions.some(t =>
-      t.accountId === r.accountId && t.date === r.date &&
-      Math.abs(parseFloat(t.amount)) === Math.abs(parseFloat(r.amount)) &&
-      t.description.toLowerCase().trim() === r.description.toLowerCase().trim()
-    ));
+    const deduped = rows.filter(r => {
+      const rAmt = Math.abs(parseFloat(r.amount));
+      const rDate = r.date;
+      const rDesc = r.description.toLowerCase().trim();
+
+      return !transactions.some(t => {
+        const tAmt = Math.abs(parseFloat(t.amount));
+        const tDate = t.date;
+        const tDesc = t.description.toLowerCase().trim();
+        const sameAccount = t.accountId === r.accountId;
+
+        // Exact match: mesma conta, data, valor e descrição
+        if (sameAccount && tDate === rDate && tAmt === rAmt && tDesc === rDesc) return true;
+
+        // Match por valor+data+conta (lançamento manual com descrição diferente)
+        // Só marca como duplicado se valor for idêntico e data for a mesma
+        if (sameAccount && tDate === rDate && tAmt === rAmt) return true;
+
+        return false;
+      });
+    });
+
     const skipped = rows.length - deduped.length;
     if (deduped.length === 0) { showToast(`Todas as ${rows.length} transações já existem.`); return; }
 
