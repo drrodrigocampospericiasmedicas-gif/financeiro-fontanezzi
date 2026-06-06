@@ -1258,7 +1258,7 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
 };
 
 // ─── IMPORTAR EXTRATO ─────────────────────────────────────────────────────────
-const ImportarExtrato = ({ accounts, onImport, allTxs }) => {
+const ImportarExtrato = ({ accounts, onImport, getTxs }) => {
   const [step, setStep]       = useState("idle");
   const [rows, setRows]       = useState([]);
   const [classifying, setCls] = useState(false);
@@ -1452,9 +1452,10 @@ Responda APENAS o objeto JSON:`
       category: detectInternalTransfer(r.description, accounts) ? "transferencia" : "outros"
     }));
 
-    // detect duplicates
+    // detect duplicates — usa getTxs() para garantir lista sempre atualizada
+    const currentTxs = getTxs ? getTxs() : [];
     const dups = withInternal.filter(r =>
-      allTxs.some(t => t.accountId===r.accountId && t.date===r.date && Math.abs(t.amount)===Math.abs(r.amount) && t.description.toLowerCase()===r.description.toLowerCase())
+      currentTxs.some(t => t.accountId===r.accountId && t.date===r.date && Math.abs(t.amount)===Math.abs(r.amount) && t.description.toLowerCase()===r.description.toLowerCase())
     );
     setDups(dups.map(d=>d.id));
     const deduped = withInternal.map(r => ({ ...r, keep: !dups.find(d=>d.id===r.id) }));
@@ -3521,12 +3522,35 @@ export default function App() {
   };
 
   const importTxs = async (rows, accountId, saldoFinal) => {
+    // Buscar transações atuais direto do Supabase para garantir dedup correto
+    let currentTxs = txsRef.current;
+    try {
+      const tblCheck = await dbFrom("transactions");
+      if (tblCheck) {
+        const fresh = await tblCheck.select("*", "&order=date.desc");
+        if (fresh?.data?.length) {
+          currentTxs = fresh.data.map(t => ({
+            id: t.id,
+            accountId: t.account_id || t.accountId,
+            date: t.date,
+            description: t.description,
+            amount: parseFloat(t.amount),
+            category: t.category || "outros",
+            notes: t.notes || "",
+            internalTransfer: t.internal_transfer || false,
+          }));
+          // Atualizar estado local também
+          setTxs(currentTxs);
+        }
+      }
+    } catch(e) { console.warn("importTxs: usando txs locais", e); }
+
     const deduped = rows.filter(r => {
       const rAmt = Math.abs(parseFloat(r.amount));
       const rDate = r.date;
       const rDesc = r.description.toLowerCase().trim();
 
-      return !transactions.some(t => {
+      return !currentTxs.some(t => {
         const tAmt = Math.abs(parseFloat(t.amount));
         const tDate = t.date;
         const tDesc = t.description.toLowerCase().trim();
@@ -3536,7 +3560,6 @@ export default function App() {
         if (sameAccount && tDate === rDate && tAmt === rAmt && tDesc === rDesc) return true;
 
         // Match por valor+data+conta (lançamento manual com descrição diferente)
-        // Só marca como duplicado se valor for idêntico e data for a mesma
         if (sameAccount && tDate === rDate && tAmt === rAmt) return true;
 
         return false;
@@ -3739,7 +3762,7 @@ export default function App() {
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
               {nav==="metas"        && <Metas        transactions={transactions} />}
-              {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} allTxs={transactions} />}
+              {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} getTxs={() => txsRef.current} />}
               {nav==="comprovantes" && <Comprovantes accounts={accounts} onAddTx={saveTx} />}
               {nav==="contas"       && <ContasView   accounts={accounts} setAccounts={setAccounts} />}
             </>}
