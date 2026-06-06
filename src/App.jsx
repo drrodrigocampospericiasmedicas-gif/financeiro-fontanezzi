@@ -3313,7 +3313,25 @@ export default function App() {
   };
 
   const saveTx = async (tx) => {
+    const existingTx = transactions.find(t=>t.id===tx.id);
     setTxs(ts => { const i = ts.findIndex(t=>t.id===tx.id); return i>=0 ? ts.map((t,idx)=>idx===i?tx:t) : [tx,...ts]; });
+
+    // Atualizar saldo da conta afetada
+    if (tx.accountId) {
+      const amtDelta = existingTx
+        ? (parseFloat(tx.amount) - parseFloat(existingTx.amount))  // edição: só a diferença
+        : parseFloat(tx.amount);                                    // novo: valor inteiro
+      if (amtDelta !== 0) {
+        setAccounts(accs => accs.map(a => {
+          if (a.id !== tx.accountId) return a;
+          const newBal = (parseFloat(a.balance) || 0) + amtDelta;
+          // Salvar no Supabase em background
+          dbFrom("accounts").then(t => t?.update({ balance: newBal }, { id: a.id }));
+          return { ...a, balance: newBal };
+        }));
+      }
+    }
+
     const tbl = await dbFrom("transactions");
     if (tbl) {
       const dbTx = {
@@ -3326,8 +3344,7 @@ export default function App() {
         notes: tx.notes || "",
         internal_transfer: tx.internalTransfer || false,
       };
-      const exists = transactions.find(t=>t.id===tx.id);
-      if (exists) await tbl.update(dbTx, {id:tx.id});
+      if (existingTx) await tbl.update(dbTx, {id:tx.id});
       else await tbl.insert(dbTx);
     }
     setForm(false); setEditTx(null);
@@ -3335,6 +3352,17 @@ export default function App() {
   };
 
   const deleteTx = async (id) => {
+    // Reverter o valor no saldo da conta antes de deletar
+    const tx = transactions.find(t=>t.id===id);
+    if (tx?.accountId && tx?.amount) {
+      const revert = -parseFloat(tx.amount);
+      setAccounts(accs => accs.map(a => {
+        if (a.id !== tx.accountId) return a;
+        const newBal = (parseFloat(a.balance) || 0) + revert;
+        dbFrom("accounts").then(t => t?.update({ balance: newBal }, { id: a.id }));
+        return { ...a, balance: newBal };
+      }));
+    }
     setTxs(ts=>ts.filter(t=>t.id!==id));
     const tbl = await dbFrom("transactions");
     if (tbl) await tbl.del({id});
