@@ -154,8 +154,13 @@ async function sbRefreshToken() {
       localStorage.setItem("sb_refresh_token", d.refresh_token || refresh_token);
       return true;
     }
-  } catch(e) {}
-  return false;
+    // Refresh falhou — limpar tokens inválidos
+    localStorage.removeItem("sb_token");
+    localStorage.removeItem("sb_refresh_token");
+    return false;
+  } catch(e) {
+    return false;
+  }
 }
 
 async function sbSignInGoogle() {
@@ -214,13 +219,27 @@ async function dbFrom(table) {
 
   return {
     async select(q = "*", extra = "") {
-      const r = await fetch(`${base}?select=${q}${extra}`, { headers: getHdrs() });
+      let r = await fetch(`${base}?select=${q}${extra}`, { headers: getHdrs() });
+      if (r.status === 401) {
+        const ok = await sbRefreshToken();
+        if (ok) {
+          r = await fetch(`${base}?select=${q}${extra}`, { headers: getHdrs() });
+        } else {
+          // Refresh falhou — sinalizar necessidade de novo login
+          window._sbSessionExpired = true;
+          return { data: [], error: "session_expired" };
+        }
+      }
       if (!r.ok) { const e = await r.text(); console.error(`select ${table}:`, r.status, e); return { data: [], error: e }; }
       return { data: await r.json() };
     },
     async insert(row) {
       let r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
-      if (r.status === 401) { await sbRefreshToken(); r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) }); }
+      if (r.status === 401) {
+        const ok = await sbRefreshToken();
+        if (ok) r = await fetch(base, { method: "POST", headers: getHdrs(), body: JSON.stringify(row) });
+        else { window._sbSessionExpired = true; return { error: "session_expired" }; }
+      }
       if (!r.ok) { const e = await r.text(); console.error(`insert ${table}:`, r.status, e); return { error: e }; }
       const text = await r.text();
       return { data: text ? JSON.parse(text) : {} };
@@ -228,7 +247,11 @@ async function dbFrom(table) {
     async update(row, match) {
       const params = Object.entries(match).map(([k,v])=>`${k}=eq.${encodeURIComponent(v)}`).join("&");
       let r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
-      if (r.status === 401) { await sbRefreshToken(); r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) }); }
+      if (r.status === 401) {
+        const ok = await sbRefreshToken();
+        if (ok) r = await fetch(`${base}?${params}`, { method: "PATCH", headers: getHdrs(), body: JSON.stringify(row) });
+        else { window._sbSessionExpired = true; return { error: "session_expired" }; }
+      }
       if (!r.ok) { const e = await r.text(); console.error(`update ${table}:`, r.status, e); return { error: e }; }
       return { data: {} };
     },
@@ -3247,6 +3270,50 @@ export default function App() {
   };
 
   const showToast = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  // Detectar sessão expirada e forçar novo login
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (window._sbSessionExpired) {
+        window._sbSessionExpired = false;
+        // Tentar refresh automático
+        sbRefreshToken().then(ok => {
+          if (!ok) {
+            // Limpar tudo e forçar login
+            localStorage.removeItem("sb_token");
+            localStorage.removeItem("sb_refresh_token");
+            setUser(null);
+            showToast("Sessão expirada. Faça login novamente.", "warn");
+          } else {
+            // Refresh ok — recarregar dados
+            const loadData = async () => {
+              const [txRes, accRes, cashRes] = await Promise.all([
+                dbFrom("transactions").then(t => t?.select("*", "&order=date.desc")),
+                dbFrom("accounts").then(t => t?.select("*", "&order=created_at.asc")),
+                dbFrom("cash_transactions").then(t => t?.select("*")),
+              ]);
+              if (txRes?.data?.length) {
+                setTxs(txRes.data.map(t => ({
+                  id: t.id, accountId: t.account_id || t.accountId,
+                  date: t.date, description: t.description,
+                  amount: parseFloat(t.amount), category: t.category || "outros",
+                  notes: t.notes || "", internalTransfer: t.internal_transfer || false,
+                })));
+              }
+              if (accRes?.data?.length) {
+                setAccounts(accRes.data.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 })));
+              }
+              if (cashRes?.data) {
+                setCashBal(cashRes.data.reduce((s, t) => s + parseFloat(t.amount || 0), 0));
+              }
+            };
+            loadData();
+          }
+        });
+      }
+    }, 5000); // checar a cada 5s
+    return () => clearInterval(interval);
+  }, []);
 
   // Check OAuth callback on mount
   useEffect(() => {
