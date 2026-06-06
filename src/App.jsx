@@ -3464,6 +3464,19 @@ export default function App() {
 
       {showConfig && <SupabaseConfig onSave={()=>{setConfig(false);showToast("Supabase configurado!");}} onClose={()=>setConfig(false)} />}
       {(showForm||editTx) && <TxForm accounts={accounts} initial={editTx} onSave={saveTx} onClose={()=>{setForm(false);setEditTx(null);}} />}
+
+      {/* FAB global — novo lançamento em qualquer tela */}
+      {!showForm && !editTx && nav !== "importar" && nav !== "comprovantes" && (
+        <button onClick={()=>{setEditTx(null);setForm(true);}} style={{
+          position:"fixed", bottom:80, right:20,
+          width:52, height:52, borderRadius:"50%",
+          background:C.gold, color:C.bg, border:"none",
+          fontSize:24, cursor:"pointer",
+          boxShadow:"0 4px 16px rgba(0,0,0,0.2)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          zIndex:90, fontWeight:300,
+        }} title="Novo lançamento">+</button>
+      )}
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
       {/* Mobile drawer */}
