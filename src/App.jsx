@@ -513,12 +513,16 @@ const SupabaseConfig = ({ onSave, onClose }) => {
 const TxForm = ({ accounts, onSave, onClose, initial }) => {
   const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"", type:"despesa", internalTransfer:false };
   const [form, setForm] = useState(initial ? { ...initial, type: initial.amount>0?"receita": initial.internalTransfer?"transferencia":"despesa", amount: Math.abs(initial.amount).toString() } : blank);
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const [errors, setErrors] = useState({});
+  const set = (k,v) => { setForm(f=>({...f,[k]:v})); setErrors(e=>({...e,[k]:false})); };
 
   const handleSave = () => {
-    if (!form.description.trim() || !form.amount) return;
+    const errs = {};
+    if (!form.description.trim()) errs.description = true;
+    if (!form.amount) errs.amount = true;
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     const amt = parseFloat(form.amount.replace(",","."));
-    if (isNaN(amt)) return;
+    if (isNaN(amt)) { setErrors({amount:true}); return; }
     onSave({ ...form, id:initial?.id||("tx_"+Date.now()), amount: form.type==="receita" ? Math.abs(amt) : -Math.abs(amt), internalTransfer: form.type==="transferencia" });
   };
 
@@ -544,10 +548,18 @@ const TxForm = ({ accounts, onSave, onClose, initial }) => {
             </select></div>
           <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>DATA</div>
             <input type="date" style={IS} value={form.date} onChange={e=>set("date",e.target.value)} /></div>
-          <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>DESCRIÇÃO</div>
-            <input style={IS} placeholder="Ex: Supermercado" value={form.description} onChange={e=>set("description",e.target.value)} /></div>
-          <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VALOR (R$)</div>
-            <input style={IS} placeholder="0,00" value={form.amount} onChange={e=>set("amount",e.target.value)} /></div>
+          <div style={{ gridColumn:"1/-1" }}>
+            <div style={{ fontSize:11, color:errors.description?C.red:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>
+              DESCRIÇÃO{errors.description && " — obrigatório"}
+            </div>
+            <input style={{...IS, border:`1px solid ${errors.description?C.red:C.border}`}} placeholder="Ex: Supermercado" value={form.description} onChange={e=>set("description",e.target.value)} />
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:errors.amount?C.red:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>
+              VALOR (R$){errors.amount && " — obrigatório"}
+            </div>
+            <input style={{...IS, border:`1px solid ${errors.amount?C.red:C.border}`}} placeholder="0,00" value={form.amount} onChange={e=>set("amount",e.target.value)} />
+          </div>
           <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CATEGORIA</div>
             <select style={IS} value={form.category} onChange={e=>set("category",e.target.value)}>
               {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
