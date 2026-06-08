@@ -883,14 +883,17 @@ function exportPDF(transactions, accounts, period, year) {
 </table>
 
 <div class="footer">Financeiro Fontanezzi &nbsp;·&nbsp; ${new Date().toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"numeric" })}</div>
-<script>window.onload = () => window.print();</script>
 </body>
 </html>`;
 
+  // Download como .html para compartilhar
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
-  window.open(url, "_blank");
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `relatorio_fontanezzi_${period || year || new Date().getFullYear()}.html`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 function exportCSV(transactions, accounts, period) {
@@ -992,7 +995,7 @@ const Relatorios = ({ transactions, accounts }) => {
           <button onClick={()=>exportPDF(transactions,accounts,null,year)} style={{
             background:C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
             padding:"8px 16px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
-          }}>📄 Exportar PDF</button>
+          }}>📄 Exportar Relatório</button>
         </div>
       </div>
 
