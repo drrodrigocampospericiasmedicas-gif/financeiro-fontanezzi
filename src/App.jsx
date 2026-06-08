@@ -3267,20 +3267,14 @@ export default function App() {
   const [user, setUser]         = useState(() => { try { return JSON.parse(localStorage.getItem("sb_user")); } catch { return null; } });
   const [nav, setNav]           = useState("dashboard");
   const [showConfig, setConfig] = useState(false);
-  const [transactions, setTxsRaw]  = useState([]);
-  const [accounts, setAccountsRaw] = useState(MOCK_ACCOUNTS); // will be overwritten by Supabase
+  const [transactions, setTxs]  = useState([]);
+  const [accounts, setAccounts] = useState(MOCK_ACCOUNTS);
   const txsRef  = useRef([]);
   const accsRef = useRef(MOCK_ACCOUNTS);
-  const setTxs = (val) => {
-    const next = typeof val === 'function' ? val(txsRef.current) : val;
-    txsRef.current = next;
-    setTxsRaw(next);
-  };
-  const setAccounts = (val) => {
-    const next = typeof val === 'function' ? val(accsRef.current) : val;
-    accsRef.current = next;
-    setAccountsRaw(next);
-  };
+
+  // Manter refs sempre atualizados via useEffect
+  useEffect(() => { txsRef.current  = transactions; }, [transactions]);
+  useEffect(() => { accsRef.current = accounts; },     [accounts]);
   const [editTx, setEditTx]     = useState(null);
   const [showForm, setForm]     = useState(false);
   const [toast, setToast]       = useState(null);
