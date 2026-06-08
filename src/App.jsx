@@ -694,6 +694,205 @@ const BarChart = ({ data, height=160 }) => {
 };
 
 // ─── EXPORT CSV ───────────────────────────────────────────────────────────────
+function exportPDF(transactions, accounts, period, year) {
+  const acc  = (id) => accounts.find(a => a.id === id) || { name: id, owner: "" };
+  const brlF = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+
+  // ── Dados de contas ─────────────────────────────────────────────────────────
+  const owners = [
+    { key: "rodrigo", label: "👨 Rodrigo", color: "#7c6dc9" },
+    { key: "claudia", label: "👩 Cláudia",  color: "#c96da0" },
+    { key: "casal",   label: "💑 Casal",    color: "#4caf82" },
+  ];
+  const accountsTotal = accounts.reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+
+  // ── Filtrar por período ──────────────────────────────────────────────────────
+  const periodLabel = period
+    ? new Date(period + "-01").toLocaleDateString("pt-BR", { month: "long", year: "numeric" })
+    : `Ano ${year || new Date().getFullYear()}`;
+  const filterKey = period || year || String(new Date().getFullYear());
+  const txs = transactions
+    .filter(t => t.date.startsWith(filterKey) && !t.internalTransfer)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const despesas = txs.filter(t => t.amount < 0);
+  const receitas = txs.filter(t => t.amount > 0);
+  const totalDes = despesas.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const totalRec = receitas.reduce((s, t) => s + t.amount, 0);
+
+  // ── Gastos por categoria ─────────────────────────────────────────────────────
+  const byCat = {};
+  despesas.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + Math.abs(t.amount); });
+  const catList = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const catColors = {
+    alimentacao:"#e67e22",padaria:"#e67e22",supermercado:"#e67e22",restaurante:"#e67e22",
+    farmacia:"#2ecc71",saude:"#2ecc71",transporte:"#3498db",gasolina:"#3498db",aluguel_carro:"#3498db",
+    moradia:"#9b59b6",aluguel:"#9b59b6",condominio:"#9b59b6",agua:"#1abc9c",luz:"#f1c40f",
+    educacao:"#8e44ad",lazer:"#e91e63",vestuario:"#ff5722",trabalho:"#607d8b",
+    financeiro:"#795548",divida:"#f44336",empregada:"#00bcd4",bela:"#e91e63",outros:"#95a5a6",
+  };
+  const maxCat = catList[0]?.[1] || 1;
+
+  // ── Donut SVG ────────────────────────────────────────────────────────────────
+  const makeDonut = (slices, size=160) => {
+    const r = 55; const cx = size/2; const cy = size/2;
+    let cumAngle = -Math.PI / 2;
+    const paths = slices.map(([id, val]) => {
+      const angle = (val / totalDes) * 2 * Math.PI;
+      const x1 = cx + r * Math.cos(cumAngle);
+      const y1 = cy + r * Math.sin(cumAngle);
+      cumAngle += angle;
+      const x2 = cx + r * Math.cos(cumAngle);
+      const y2 = cy + r * Math.sin(cumAngle);
+      const large = angle > Math.PI ? 1 : 0;
+      const color = catColors[id] || "#95a5a6";
+      return `<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${color}" opacity="0.85"/>`;
+    });
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      ${paths.join("")}
+      <circle cx="${cx}" cy="${cy}" r="30" fill="white"/>
+    </svg>`;
+  };
+
+  // ── Linhas do extrato ────────────────────────────────────────────────────────
+  const extratoRows = txs.map(t => {
+    const a = acc(t.accountId);
+    const isRec = t.amount > 0;
+    return `<tr>
+      <td>${t.date.split("-").reverse().join("/")}</td>
+      <td>${t.description || "-"}</td>
+      <td>${a.name}</td>
+      <td>${t.category || "outros"}</td>
+      <td style="text-align:right;color:${isRec ? "#2e7d32" : "#c62828"};font-weight:600">${brlF(t.amount)}</td>
+    </tr>`;
+  }).join("");
+
+  // ── HTML ─────────────────────────────────────────────────────────────────────
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>Relatório Fontanezzi — ${periodLabel}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Cormorant+Garamond:wght@600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'DM Sans',sans-serif;color:#1a1a2e;background:#fff;padding:32px;max-width:900px;margin:0 auto}
+  h1{font-family:'Cormorant Garamond',serif;font-size:32px;color:#1a1a2e;margin-bottom:4px}
+  h2{font-family:'Cormorant Garamond',serif;font-size:20px;color:#1a1a2e;margin:28px 0 12px}
+  .subtitle{font-size:13px;color:#888;margin-bottom:32px}
+  .label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#888;margin-bottom:4px}
+  /* KPIs */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+  .kpi{background:#f8f8fc;border-radius:12px;padding:16px}
+  .kpi .val{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:700}
+  /* Contas */
+  .contas{width:100%;border-collapse:collapse;margin-bottom:28px}
+  .contas th{text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#888;padding:6px 10px;border-bottom:2px solid #e8e8f0}
+  .contas td{padding:10px 10px;border-bottom:1px solid #f0f0f8;font-size:13px}
+  .contas tr:last-child td{border-bottom:none;font-weight:700;font-size:14px;color:#b8960c}
+  /* Gráfico categorias */
+  .cat-section{display:flex;gap:32px;align-items:flex-start;margin-bottom:28px}
+  .cat-bars{flex:1}
+  .cat-row{margin-bottom:10px}
+  .cat-row-header{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+  .bar-bg{height:6px;background:#ebebf5;border-radius:3px}
+  .bar-fill{height:100%;border-radius:3px}
+  /* Extrato */
+  .extrato{width:100%;border-collapse:collapse;font-size:12px}
+  .extrato th{text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#888;padding:6px 8px;border-bottom:2px solid #e8e8f0}
+  .extrato td{padding:8px 8px;border-bottom:1px solid #f5f5fa}
+  .extrato tr:hover td{background:#fafafa}
+  .footer{margin-top:40px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #e8e8f0;padding-top:16px}
+  .totals-row td{font-weight:700;background:#f8f8fc;color:#1a1a2e}
+  @media print{
+    body{padding:16px}
+    @page{margin:15mm;size:A4}
+  }
+</style>
+</head>
+<body>
+<h1>Família Fontanezzi</h1>
+<div class="subtitle">Relatório Financeiro — ${periodLabel} &nbsp;·&nbsp; Gerado em ${new Date().toLocaleDateString("pt-BR")}</div>
+
+<!-- KPIs -->
+<div class="kpis">
+  <div class="kpi">
+    <div class="label">Patrimônio Total</div>
+    <div class="val" style="color:#b8960c">${brlF(accountsTotal)}</div>
+    <div style="font-size:11px;color:#888;margin-top:2px">contas bancárias</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Receitas do período</div>
+    <div class="val" style="color:#2e7d32">${brlF(totalRec)}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Despesas do período</div>
+    <div class="val" style="color:#c62828">${brlF(totalDes)}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Saldo do período</div>
+    <div class="val" style="color:${totalRec - totalDes >= 0 ? "#2e7d32" : "#c62828"}">${brlF(totalRec - totalDes)}</div>
+  </div>
+</div>
+
+<!-- Contas -->
+<h2>Saldo das Contas</h2>
+<table class="contas">
+  <thead><tr><th>Conta</th><th>Tipo</th><th>Titular</th><th style="text-align:right">Saldo</th></tr></thead>
+  <tbody>
+    ${accounts.map(a => `<tr>
+      <td>${a.name}</td>
+      <td>${a.type || "corrente"}</td>
+      <td>${a.owner === "rodrigo" ? "Rodrigo" : a.owner === "claudia" ? "Cláudia" : "Casal"}</td>
+      <td style="text-align:right;color:${parseFloat(a.balance) >= 0 ? "#2e7d32" : "#c62828"}">${brlF(parseFloat(a.balance) || 0)}</td>
+    </tr>`).join("")}
+    <tr class="totals-row">
+      <td colspan="3">TOTAL</td>
+      <td style="text-align:right;color:#b8960c">${brlF(accountsTotal)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Gastos por categoria -->
+<h2>Despesas por Categoria</h2>
+<div class="cat-section">
+  ${makeDonut(catList)}
+  <div class="cat-bars">
+    ${catList.map(([id, val]) => `
+      <div class="cat-row">
+        <div class="cat-row-header">
+          <span>${id}</span>
+          <span style="font-weight:600">${brlF(val)} <span style="font-weight:400;color:#888">(${(val/totalDes*100).toFixed(0)}%)</span></span>
+        </div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxCat*100).toFixed(0)}%;background:${catColors[id]||"#95a5a6"}"></div></div>
+      </div>`).join("")}
+  </div>
+</div>
+
+<!-- Extrato -->
+<h2>Extrato — ${periodLabel}</h2>
+<table class="extrato">
+  <thead><tr><th>Data</th><th>Descrição</th><th>Conta</th><th>Categoria</th><th style="text-align:right">Valor</th></tr></thead>
+  <tbody>
+    ${extratoRows}
+    <tr class="totals-row">
+      <td colspan="4">Saldo do período</td>
+      <td style="text-align:right;color:${totalRec-totalDes>=0?"#2e7d32":"#c62828"}">${brlF(totalRec - totalDes)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footer">Financeiro Fontanezzi &nbsp;·&nbsp; ${new Date().toLocaleDateString("pt-BR", { weekday:"long", year:"numeric", month:"long", day:"numeric" })}</div>
+<script>window.onload = () => window.print();</script>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 function exportCSV(transactions, accounts, period) {
   const rows = transactions
     .filter(t => !period || t.date.startsWith(period))
@@ -790,6 +989,10 @@ const Relatorios = ({ transactions, accounts }) => {
             background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
             padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
           }}>⬇ CSV</button>
+          <button onClick={()=>exportPDF(transactions,accounts,null,year)} style={{
+            background:C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
+            padding:"8px 16px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
+          }}>📄 Exportar PDF</button>
         </div>
       </div>
 
