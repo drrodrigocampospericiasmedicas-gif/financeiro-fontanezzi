@@ -3459,9 +3459,31 @@ export default function App() {
   const saveTx = async (tx) => {
     const existingTx = txsRef.current.find(t => t.id === tx.id);
 
-    // 1. Salvar transação no Supabase
-    const tbl = await dbFrom("transactions");
-    if (tbl) {
+    // 1. Fechar modal e atualizar UI imediatamente (não travar esperando Supabase)
+    setForm(false); setEditTx(null);
+
+    // 2. Atualizar lista local de transações
+    setTxs(ts => ts.findIndex(t => t.id === tx.id) >= 0
+      ? ts.map(t => t.id === tx.id ? tx : t)
+      : [tx, ...ts]);
+
+    // 3. Atualizar saldo da conta localmente
+    if (tx.accountId && !tx.internalTransfer) {
+      const oldAmt = existingTx ? parseFloat(existingTx.amount) : 0;
+      const delta  = parseFloat(tx.amount) - oldAmt;
+      if (delta !== 0) {
+        setAccounts(accs => accs.map(a => {
+          if (a.id !== tx.accountId) return a;
+          return { ...a, balance: parseFloat(a.balance || 0) + delta };
+        }));
+      }
+    }
+
+    showToast("Lançamento salvo!");
+
+    // 4. Persistir no Supabase em background (sem await — não bloqueia UI)
+    dbFrom("transactions").then(async tbl => {
+      if (!tbl) return;
       if (existingTx) {
         await tbl.update({
           account_id: tx.accountId,
@@ -3484,41 +3506,52 @@ export default function App() {
           internal_transfer: tx.internalTransfer || false,
         });
       }
-    }
-
-    // 2. Atualizar lista local de transações
-    setTxs(ts => ts.findIndex(t => t.id === tx.id) >= 0
-      ? ts.map(t => t.id === tx.id ? tx : t)
-      : [tx, ...ts]);
-
-    // 3. Atualizar saldo da conta
-    if (tx.accountId && !tx.internalTransfer) {
-      const oldAmt = existingTx ? parseFloat(existingTx.amount) : 0;
-      const delta  = parseFloat(tx.amount) - oldAmt;
-      await updateAccountBalance(tx.accountId, delta);
-    }
-
-    setForm(false); setEditTx(null);
-    showToast("Lançamento salvo!");
+      // Persistir saldo da conta no Supabase
+      if (tx.accountId && !tx.internalTransfer) {
+        const oldAmt = existingTx ? parseFloat(existingTx.amount) : 0;
+        const delta  = parseFloat(tx.amount) - oldAmt;
+        if (delta !== 0) {
+          const acc = accsRef.current.find(a => a.id === tx.accountId);
+          if (acc) {
+            const tblAcc = await dbFrom("accounts");
+            if (tblAcc) await tblAcc.update({ balance: acc.balance }, { id: acc.id });
+          }
+        }
+      }
+    }).catch(err => console.error("[saveTx] erro ao persistir:", err));
   };
 
   const deleteTx = async (id) => {
     if (!window.confirm("Excluir este lançamento?")) return;
     const tx = txsRef.current.find(t => t.id === id);
 
-    // 1. Deletar do Supabase
-    const tbl = await dbFrom("transactions");
-    if (tbl) await tbl.del({ id });
-
-    // 2. Remover da lista local
+    // 1. Remover da UI imediatamente
     setTxs(ts => ts.filter(t => t.id !== id));
 
-    // 3. Reverter saldo da conta
+    // 2. Reverter saldo da conta localmente
     if (tx?.accountId && tx?.amount && !tx?.internalTransfer) {
-      await updateAccountBalance(tx.accountId, -parseFloat(tx.amount));
+      const delta = -parseFloat(tx.amount);
+      setAccounts(accs => accs.map(a => {
+        if (a.id !== tx.accountId) return a;
+        return { ...a, balance: parseFloat(a.balance || 0) + delta };
+      }));
     }
 
     showToast("Removido", "warn");
+
+    // 3. Deletar do Supabase em background
+    dbFrom("transactions").then(async tbl => {
+      if (!tbl) return;
+      await tbl.del({ id });
+      // Persistir saldo revertido no Supabase
+      if (tx?.accountId && tx?.amount && !tx?.internalTransfer) {
+        const acc = accsRef.current.find(a => a.id === tx.accountId);
+        if (acc) {
+          const tblAcc = await dbFrom("accounts");
+          if (tblAcc) await tblAcc.update({ balance: acc.balance }, { id: acc.id });
+        }
+      }
+    }).catch(err => console.error("[deleteTx] erro:", err));
   };
 
   const importTxs = async (rows, accountId, saldoFinal) => {
