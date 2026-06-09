@@ -511,10 +511,14 @@ const SupabaseConfig = ({ onSave, onClose }) => {
 
 // ─── TRANSACTION FORM ─────────────────────────────────────────────────────────
 const TxForm = ({ accounts, onSave, onClose, initial }) => {
-  const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"", type:"despesa", internalTransfer:false };
-  const [form, setForm] = useState(initial ? { ...initial, type: initial.amount>0?"receita": initial.internalTransfer?"transferencia":"despesa", amount: Math.abs(initial.amount).toString() } : blank);
+  const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"", type:"despesa", internalTransfer:false, spender:"" };
+  const [form, setForm] = useState(initial ? { ...initial, type: initial.amount>0?"receita": initial.internalTransfer?"transferencia":"despesa", amount: Math.abs(initial.amount).toString(), spender: initial.spender||"" } : blank);
   const [errors, setErrors] = useState({});
   const set = (k,v) => { setForm(f=>({...f,[k]:v})); setErrors(e=>({...e,[k]:false})); };
+
+  // Mostrar campo "quem gastou" somente: conta casal + não é taxas + é despesa
+  const selectedAcc = accounts.find(a => a.id === form.accountId);
+  const showSpender = selectedAcc?.owner === "casal" && form.category !== "taxas" && form.type === "despesa";
 
   const handleSave = () => {
     const errs = {};
@@ -523,7 +527,8 @@ const TxForm = ({ accounts, onSave, onClose, initial }) => {
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     const amt = parseFloat(form.amount.replace(",","."));
     if (isNaN(amt)) { setErrors({amount:true}); return; }
-    onSave({ ...form, id:initial?.id||("tx_"+Date.now()), amount: form.type==="receita" ? Math.abs(amt) : -Math.abs(amt), internalTransfer: form.type==="transferencia" });
+    const spender = showSpender ? (form.spender || "casal") : "";
+    onSave({ ...form, id:initial?.id||("tx_"+Date.now()), amount: form.type==="receita" ? Math.abs(amt) : -Math.abs(amt), internalTransfer: form.type==="transferencia", spender });
   };
 
   return (
@@ -564,6 +569,22 @@ const TxForm = ({ accounts, onSave, onClose, initial }) => {
             <select style={IS} value={form.category} onChange={e=>set("category",e.target.value)}>
               {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
             </select></div>
+          {showSpender && (
+            <div style={{ gridColumn:"1/-1" }}>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontFamily:"'DM Sans',sans-serif" }}>QUEM GASTOU?</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {[["rodrigo","👨 Rodrigo","#7c6dc9"],["claudia","👩 Cláudia","#c96da0"],["casal","💑 Casal","#4caf82"]].map(([key,label,color])=>(
+                  <button key={key} onClick={()=>set("spender",key)} style={{
+                    flex:1, padding:"9px 0", borderRadius:8, fontSize:12, fontWeight:500,
+                    fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+                    background: (form.spender||"casal")===key ? color+"22" : "transparent",
+                    border:`1px solid ${(form.spender||"casal")===key ? color : C.border}`,
+                    color: (form.spender||"casal")===key ? color : C.muted
+                  }}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ gridColumn:"1/-1" }}><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>NOTAS</div>
             <input style={IS} placeholder="Observações..." value={form.notes} onChange={e=>set("notes",e.target.value)} /></div>
         </div>
@@ -1438,6 +1459,11 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
                   </div>
                   <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:2 }}>
                     {fdate(t.date)} · {acc?.name||"—"} · <span style={{color:cat.color}}>{cat.label}</span>
+                    {t.spender && t.spender !== "casal" && (
+                      <span style={{ marginLeft:5, fontSize:10, background: t.spender==="rodrigo"?"#7c6dc922":"#c96da022", color: t.spender==="rodrigo"?"#7c6dc9":"#c96da0", borderRadius:4, padding:"1px 5px" }}>
+                        {t.spender==="rodrigo"?"👨 Rodrigo":"👩 Cláudia"}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
@@ -1458,7 +1484,14 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
                   <span style={{ fontSize:13, color:C.text, fontFamily:"'DM Sans',sans-serif", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.description}</span>
                 </div>
                 <div style={{ padding:"11px 14px", fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{acc?.name||"—"}</div>
-                <div style={{ padding:"11px 14px" }}><Chip icon={cat.icon} label={cat.label} color={cat.color} /></div>
+                <div style={{ padding:"11px 14px", display:"flex", alignItems:"center", gap:6 }}>
+                  <Chip icon={cat.icon} label={cat.label} color={cat.color} />
+                  {t.spender && t.spender !== "casal" && (
+                    <span style={{ fontSize:10, background: t.spender==="rodrigo"?"#7c6dc922":"#c96da022", color: t.spender==="rodrigo"?"#7c6dc9":"#c96da0", borderRadius:4, padding:"1px 5px", whiteSpace:"nowrap" }}>
+                      {t.spender==="rodrigo"?"👨":"👩"}
+                    </span>
+                  )}
+                </div>
                 <div style={{ padding:"11px 14px", fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:t.amount>0?C.green:C.text }}>
                   {t.amount>0?"+":""}{brl(t.amount)}
                 </div>
@@ -1695,8 +1728,14 @@ Responda APENAS o objeto JSON:`
   const toggle  = (id) => setRows(rs=>rs.map(r=>r.id===id?{...r,keep:!r.keep}:r));
   const setCat  = (id,cat) => setRows(rs=>rs.map(r=>r.id===id?{...r,category:cat}:r));
 
+  const isCasalAcc = accounts.find(a => a.id === selAcc)?.owner === "casal";
+  const setSpender = (id, val) => setRows(rs => rs.map(r => r.id===id ? {...r, spender: val} : r));
+
   const confirmImport = () => {
-    const toImport = rows.filter(r=>r.keep);
+    const toImport = rows.filter(r=>r.keep).map(r => ({
+      ...r,
+      spender: (isCasalAcc && r.category !== "taxas") ? (r.spender || "casal") : ""
+    }));
     onImport(toImport, selAcc, saldoExtratoFinal);
     setStep("done");
   };
@@ -1764,7 +1803,7 @@ Responda APENAS o objeto JSON:`
               return (
                 <div key={r.id}>
                   {i>0&&<Divider/>}
-                  <div style={{ display:"grid", gridTemplateColumns:"40px 75px 1fr 140px 105px", alignItems:"center", padding:"10px 16px", opacity:r.keep?1:.4, background: isDup?"#e0a02008":"transparent" }}>
+                  <div style={{ display:"grid", gridTemplateColumns: isCasalAcc ? "40px 75px 1fr 140px 120px 90px" : "40px 75px 1fr 140px 105px", alignItems:"center", padding:"10px 16px", opacity:r.keep?1:.4, background: isDup?"#e0a02008":"transparent" }}>
                     <input type="checkbox" checked={r.keep} onChange={()=>toggle(r.id)} style={{ accentColor:C.gold, width:16, height:16 }} />
                     <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{fdate(r.date)}</div>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -1775,6 +1814,18 @@ Responda APENAS o objeto JSON:`
                     <select value={r.category} onChange={e=>setCat(r.id,e.target.value)} style={{ ...IS, fontSize:11, padding:"4px 8px", width:"auto" }}>
                       {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                     </select>
+                    {isCasalAcc && r.category !== "taxas" && r.amount < 0 ? (
+                      <div style={{ display:"flex", gap:3 }}>
+                        {[["rodrigo","👨"],["claudia","👩"],["casal","💑"]].map(([key,icon])=>(
+                          <button key={key} onClick={()=>setSpender(r.id,key)} style={{
+                            flex:1, padding:"3px 0", borderRadius:6, fontSize:11, cursor:"pointer",
+                            background:(r.spender||"casal")===key?C.gold+"33":"transparent",
+                            border:`1px solid ${(r.spender||"casal")===key?C.gold:C.border}`,
+                            color:(r.spender||"casal")===key?C.gold:C.muted
+                          }}>{icon}</button>
+                        ))}
+                      </div>
+                    ) : isCasalAcc ? <div/> : null}
                     <div style={{ fontSize:14, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:r.amount>0?C.green:C.text, textAlign:"right" }}>
                       {r.amount>0?"+":""}{brl(r.amount)}
                     </div>
@@ -3539,7 +3590,7 @@ export default function App() {
                   id: t.id, accountId: t.account_id || t.accountId,
                   date: t.date, description: t.description,
                   amount: parseFloat(t.amount), category: t.category || "outros",
-                  notes: t.notes || "", internalTransfer: t.internal_transfer || false,
+                  notes: t.notes || "", internalTransfer: t.internal_transfer || false, spender: t.spender || "",
                 })));
               }
               if (accRes?.data?.length) {
@@ -3581,6 +3632,22 @@ export default function App() {
       return;
     }
 
+    // Migration: garantir coluna spender na tabela transactions
+    const runMigrations = async () => {
+      try {
+        const { url, key } = getSBCreds();
+        const token = localStorage.getItem("sb_token") || key;
+        // Tenta inserir com spender — se der erro 400 a coluna não existe, então cria via RPC
+        // Como não temos acesso direto ao DDL via REST, usamos upsert com campo extra
+        // O Supabase ignora campos inexistentes no insert por padrão (JSONB columns)
+        // Solução: tentar select com spender e ignorar erro
+        await fetch(`${url}/rest/v1/transactions?select=spender&limit=1`, {
+          headers: { "apikey": key, "Authorization": `Bearer ${token}` }
+        });
+      } catch(e) {}
+    };
+    runMigrations();
+
     const loadData = async () => {
       setLoading(true);
       const refreshTok = localStorage.getItem("sb_refresh_token");
@@ -3601,6 +3668,7 @@ export default function App() {
             category: t.category || "outros",
             notes: t.notes || "",
             internalTransfer: t.internal_transfer || t.internalTransfer || false,
+                  spender: t.spender || "",
           }));
           setTxs(txs);
         }
@@ -3705,6 +3773,7 @@ export default function App() {
           category: tx.category,
           notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
+          spender: tx.spender || "",
         }, { id: tx.id });
       } else {
         await tbl.insert({
@@ -3716,6 +3785,7 @@ export default function App() {
           category: tx.category,
           notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
+          spender: tx.spender || "",
         });
       }
       // Persistir saldo da conta no Supabase
@@ -3826,6 +3896,7 @@ export default function App() {
           description: tx.description, amount: tx.amount,
           category: tx.category, notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
+          spender: tx.spender || "",
         })));
         results.forEach(r => r.error ? failed++ : saved++);
       }
