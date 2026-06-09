@@ -715,7 +715,7 @@ const BarChart = ({ data, height=160 }) => {
 };
 
 // ─── EXPORT CSV ───────────────────────────────────────────────────────────────
-function exportPDF(transactions, accounts, period, year) {
+function exportPDF(transactions, accounts, period, year, cashBal) {
   const acc  = (id) => accounts.find(a => a.id === id) || { name: id, owner: "" };
   const brlF = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
@@ -726,6 +726,8 @@ function exportPDF(transactions, accounts, period, year) {
     { key: "casal",   label: "💑 Casal",    color: "#4caf82" },
   ];
   const accountsTotal = accounts.reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+  const cashTotal     = parseFloat(cashBal) || 0;
+  const grandTotal    = accountsTotal + cashTotal;
 
   // ── Filtrar por período ──────────────────────────────────────────────────────
   const periodLabel = period
@@ -839,8 +841,8 @@ function exportPDF(transactions, accounts, period, year) {
 <div class="kpis">
   <div class="kpi">
     <div class="label">Patrimônio Total</div>
-    <div class="val" style="color:#b8960c">${brlF(accountsTotal)}</div>
-    <div style="font-size:11px;color:#888;margin-top:2px">contas bancárias</div>
+    <div class="val" style="color:#b8960c">${brlF(grandTotal)}</div>
+    <div style="font-size:11px;color:#888;margin-top:2px">contas + dinheiro em espécie</div>
   </div>
   <div class="kpi">
     <div class="label">Receitas do período</div>
@@ -867,9 +869,15 @@ function exportPDF(transactions, accounts, period, year) {
       <td>${a.owner === "rodrigo" ? "Rodrigo" : a.owner === "claudia" ? "Cláudia" : "Casal"}</td>
       <td style="text-align:right;color:${parseFloat(a.balance) >= 0 ? "#2e7d32" : "#c62828"}">${brlF(parseFloat(a.balance) || 0)}</td>
     </tr>`).join("")}
+    ${cashTotal !== 0 ? `<tr>
+      <td>💵 Dinheiro em espécie</td>
+      <td>—</td>
+      <td>Rodrigo + Cláudia</td>
+      <td style="text-align:right;color:#2e7d32">${brlF(cashTotal)}</td>
+    </tr>` : ""}
     <tr class="totals-row">
-      <td colspan="3">TOTAL</td>
-      <td style="text-align:right;color:#b8960c">${brlF(accountsTotal)}</td>
+      <td colspan="3">TOTAL GERAL</td>
+      <td style="text-align:right;color:#b8960c">${brlF(grandTotal)}</td>
     </tr>
   </tbody>
 </table>
@@ -935,7 +943,7 @@ function exportCSV(transactions, accounts, period) {
 }
 
 // ─── RELATORIOS ───────────────────────────────────────────────────────────────
-const Relatorios = ({ transactions, accounts }) => {
+const Relatorios = ({ transactions, accounts, cashBal }) => {
   const [tab, setTab] = useState("tendencia"); // tendencia | categorias | pessoa | mensal
   const [year, setYear] = useState(String(TODAY.getFullYear()));
 
@@ -1013,7 +1021,7 @@ const Relatorios = ({ transactions, accounts }) => {
             background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
             padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
           }}>⬇ CSV</button>
-          <button onClick={()=>exportPDF(transactions,accounts,null,year)} style={{
+          <button onClick={()=>exportPDF(transactions,accounts,null,year,cashBal)} style={{
             background:C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
             padding:"8px 16px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
           }}>📄 Exportar Relatório</button>
@@ -4073,7 +4081,7 @@ export default function App() {
             ) : <>
               {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} cashBal={cashBal} />}
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
-              {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} />}
+              {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
