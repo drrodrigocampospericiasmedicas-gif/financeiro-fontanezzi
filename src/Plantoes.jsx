@@ -332,6 +332,155 @@ const Calendar = ({ plantoes, month, year, onDayClick }) => {
   );
 };
 
+// ─── MULTI-MÊS: gerar e compartilhar HTML com vários meses somados ──────────
+async function generateMultiMonthHTML(plantoes, selectedKeys) {
+  const bank   = loadLS(LS_B, {});
+  const fmt_brl = (v) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
+  const fmt_date = (s) => { try { const [y,m,d]=String(s).split("T")[0].split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric"}); } catch { return s; } };
+
+  // Filtrar plantões dos meses selecionados
+  const allData = plantoes.filter(p => {
+    try {
+      const d = parseDate(p.data);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      return selectedKeys.includes(key);
+    } catch { return false; }
+  }).sort((a,b) => String(a.data).localeCompare(String(b.data)));
+
+  // Agrupar por mês para exibir separado
+  const byMonth = {};
+  allData.forEach(p => {
+    const d = parseDate(p.data);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    if (!byMonth[key]) byMonth[key] = [];
+    byMonth[key].push(p);
+  });
+
+  const sortedKeys = [...selectedKeys].sort();
+  const periodLabel = sortedKeys.map(k => {
+    const [y,m] = k.split("-");
+    return MONTHS[parseInt(m)-1] + "/" + y.slice(2);
+  }).join(" + ");
+
+  const totP = allData.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
+  const totA = allData.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
+  const tot  = totP + totA;
+
+  // Gerar seções por mês
+  const monthSections = sortedKeys.map(key => {
+    const mData = byMonth[key] || [];
+    if (!mData.length) return "";
+    const [y,m] = key.split("-");
+    const mLabel = MONTHS[parseInt(m)-1] + " " + y;
+    const mTotP = mData.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
+    const mTotA = mData.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
+    const mTot  = mTotP + mTotA;
+    const rows = mData.map(p => `<tr>
+      <td>${fmt_date(p.data)}</td>
+      <td><span class="badge ${p.tipo}">${p.tipo==="plantao"?"🏥 Plantão":"🩺 Amb."}</span></td>
+      <td>${p.local}</td>
+      <td class="valor">${fmt_brl(p.valor)}</td>
+      <td>${p.obs||""}</td>
+    </tr>`).join("");
+    return `
+      <div class="month-section">
+        <div class="month-header">${mLabel} <span style="font-weight:400;font-size:14px;color:#64748b">· ${mData.length} lançamentos</span></div>
+        <table>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Local / Hospital</th><th>Valor</th><th>Obs.</th></tr></thead>
+          <tbody>${rows}
+            <tr class="subtotal"><td colspan="3" style="text-align:right;font-weight:600">Total ${mLabel}</td><td class="valor" style="color:#1a1a2e">${fmt_brl(mTot)}</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>`;
+  }).join("");
+
+  const bankHtml = (bank.pix||bank.conta) ? `
+    <div class="bank"><div class="bank-title">Dados para Pagamento</div>
+    <div class="bank-grid">
+      ${bank.banco?`<div><b>Banco:</b> ${bank.banco}</div>`:""}
+      ${bank.agencia?`<div><b>Agência:</b> ${bank.agencia}</div>`:""}
+      ${bank.conta?`<div><b>Conta:</b> ${bank.conta}</div>`:""}
+      ${bank.pix?`<div class="pix-row"><b>PIX:</b> ${bank.pix}</div>`:""}
+    </div></div>` : "";
+
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'IBM Plex Sans',sans-serif;color:#1a1a2e;background:#fff;padding:40px;max-width:860px;margin:0 auto;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #1a1a2e;}
+  .title{font-family:'Playfair Display',serif;font-size:26px;font-weight:700;color:#1a1a2e;line-height:1.2;}
+  .subtitle{font-size:12px;color:#64748b;margin-top:4px;}
+  .period-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;}
+  .period-value{font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#1a1a2e;text-align:right;max-width:340px;}
+  .totals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:28px;}
+  .tc{border:1px solid #e2e8f0;border-radius:12px;padding:14px;text-align:center;}
+  .tc.main{background:#1a1a2e;color:#fff;}
+  .tl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:5px;}
+  .tc.main .tl{color:#94a3b8;}
+  .tv{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;}
+  .tc.p .tv{color:#1d4ed8;} .tc.a .tv{color:#0d9488;} .tc.main .tv{color:#fff;}
+  .month-section{margin-bottom:28px;}
+  .month-header{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#1a1a2e;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;}
+  table{width:100%;border-collapse:collapse;margin-bottom:8px;}
+  th{background:#1a1a2e;color:#fff;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+  td{padding:8px 10px;border-bottom:1px solid #f0f0f8;font-size:13px;}
+  .badge{padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;}
+  .badge.plantao{background:#dbeafe;color:#1d4ed8;} .badge.ambulatorio{background:#ccfbf1;color:#0d9488;}
+  .valor{font-weight:600;}
+  .subtotal td{background:#f8f8fc;font-weight:600;}
+  .total-final{background:#1a1a2e;color:#fff;}
+  .total-final td{padding:12px 10px;font-size:15px;color:#fff;}
+  .bank{border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin-top:20px;}
+  .bank-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:10px;}
+  .bank-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:13px;}
+  .pix-row{grid-column:1/-1;font-size:14px;}
+  .footer{margin-top:28px;padding-top:14px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center;}
+  @media print{body{padding:16px}@page{margin:15mm;size:A4}}
+</style></head><body>
+  <div class="header">
+    <div><div class="title">Plantões<br>Dr. Rodrigo Fontanezzi</div>
+    <div class="subtitle">CRM 97684-9 · RQE 32466 · Ortopedia e Traumatologia</div></div>
+    <div><div class="period-label">Período</div><div class="period-value">${periodLabel}</div></div>
+  </div>
+  <div class="totals">
+    <div class="tc p"><div class="tl">🏥 Plantões</div><div class="tv">${fmt_brl(totP)}</div></div>
+    <div class="tc a"><div class="tl">🩺 Ambulatório</div><div class="tv">${fmt_brl(totA)}</div></div>
+    <div class="tc main"><div class="tl">Total Geral</div><div class="tv">${fmt_brl(tot)}</div></div>
+  </div>
+  ${monthSections}
+  <table><tbody>
+    <tr class="total-final">
+      <td colspan="3" style="text-align:right;font-weight:700;font-family:'Playfair Display',serif">TOTAL ${selectedKeys.length} ${selectedKeys.length===1?"MÊS":"MESES"}</td>
+      <td class="valor">${fmt_brl(tot)}</td><td></td>
+    </tr>
+  </tbody></table>
+  ${bankHtml}
+  <div class="footer">Gerado em ${new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})} · ${allData.length} lançamentos · ${selectedKeys.length} ${selectedKeys.length===1?"mês":"meses"}</div>
+</body></html>`;
+
+  const blob = new Blob([html], { type:"text/html;charset=utf-8" });
+  const filename = `Plantoes_DrFontanezzi_${sortedKeys.join("_")}.html`;
+
+  if (navigator.share) {
+    try {
+      const file = new File([blob], filename, { type:"text/html" });
+      if (navigator.canShare && navigator.canShare({ files:[file] })) {
+        await navigator.share({ title:`Plantões Dr. Rodrigo — ${periodLabel}`, text:`Plantões · ${periodLabel} · Total: ${fmt_brl(tot)}`, files:[file] });
+        return;
+      }
+      await navigator.share({ title:`Plantões Dr. Rodrigo — ${periodLabel}`, text:`Plantões Dr. Rodrigo Fontanezzi\n${periodLabel}\nTotal: ${fmt_brl(tot)}` });
+      return;
+    } catch(e) { if (e.name==="AbortError") return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
 // ─── PDF ───────────────────────────────────────────────────────────────────────
 async function generateAndSharePDF(plantoes, month, year) {
   const bank = loadLS(LS_B, {});
@@ -494,6 +643,10 @@ export default function App() {
   const [dayPicker, setDayPicker]   = useState(null); // date string
   const [tab, setTab]               = useState("lista");
   const [toast, setToast]           = useState("");
+  const [showAccum, setShowAccum]   = useState(false);
+  const [selMonths, setSelMonths]   = useState([]);
+
+  const toggleSelMonth = (key) => setSelMonths(s => s.includes(key) ? s.filter(k=>k!==key) : [...s,key]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(""),3000); };
 
@@ -566,6 +719,20 @@ export default function App() {
   const totP = filtered.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
   const totA = filtered.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
 
+  // Meses disponíveis para o seletor — baseado no year atual
+  const availableMonthKeys = Array.from({length:12},(_,i)=>{
+    const key = `${year}-${String(i+1).padStart(2,"0")}`;
+    const hasTxs = plantoes.some(p=>{ try{ const d=parseDate(p.data); return d.getMonth()===i&&d.getFullYear()===year; }catch{return false;} });
+    const tot = plantoes.filter(p=>{ try{ const d=parseDate(p.data); return d.getMonth()===i&&d.getFullYear()===year; }catch{return false;} }).reduce((s,p)=>s+p.valor,0);
+    return { key, label: MONTHS[i].slice(0,3), hasTxs, tot };
+  });
+
+  // Totais acumulados dos meses selecionados
+  const accumData = selMonths.length>0 ? plantoes.filter(p=>{ try{ const d=parseDate(p.data); const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; return selMonths.includes(k); }catch{return false;} }) : [];
+  const accumTotP = accumData.filter(p=>p.tipo==="plantao").reduce((s,p)=>s+p.valor,0);
+  const accumTotA = accumData.filter(p=>p.tipo==="ambulatorio").reduce((s,p)=>s+p.valor,0);
+  const accumTot  = accumTotP + accumTotA;
+
   return (
     <>
       <style>{FONTS}</style>
@@ -585,19 +752,76 @@ export default function App() {
               <div style={{fontSize:10,color:C.muted,fontFamily:"'IBM Plex Sans',sans-serif",letterSpacing:2,textTransform:"uppercase"}}>Dr. Rodrigo Fontanezzi</div>
               <div style={{fontSize:20,fontFamily:"'Playfair Display',serif",color:C.text,fontWeight:700,lineHeight:1.1}}>Controle de Plantões</div>
             </div>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <button onClick={()=>setShowLocais(true)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.soft,borderRadius:8,padding:"8px 11px",fontSize:12,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>
                 🏥 Locais
               </button>
               <button onClick={()=>setShowBank(true)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.soft,borderRadius:8,padding:"8px 11px",fontSize:12,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>
                 🏦
               </button>
+              <button onClick={()=>setShowAccum(s=>!s)} style={{
+                background: selMonths.length>0 ? "#2563eb22" : C.surface,
+                border:`1px solid ${selMonths.length>0?"#3b82f6":C.border}`,
+                color: selMonths.length>0 ? "#60a5fa" : C.soft,
+                borderRadius:8,padding:"8px 11px",fontSize:12,
+                fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer",fontWeight:selMonths.length>0?600:400
+              }}>
+                Σ {selMonths.length>0?`${selMonths.length}m`:"Meses"}
+              </button>
               <button onClick={()=>generateAndSharePDF(plantoes,month,year)} style={{background:C.green,color:"#fff",border:"none",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:600,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>
-                📤 PDF
+                📤 Mês
               </button>
             </div>
           </div>
         </div>
+
+        {/* Painel seletor de meses */}
+        {showAccum && (
+          <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"14px 16px",marginBottom:8}}>
+            <div style={{maxWidth:600,margin:"0 auto"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontSize:15,fontFamily:"'Playfair Display',serif",color:C.text,fontWeight:700}}>Selecionar meses — {year}</div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>setSelMonths(availableMonthKeys.filter(m=>m.hasTxs).map(m=>m.key))} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"4px 10px",fontSize:11,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>Todos</button>
+                  <button onClick={()=>setSelMonths([])} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"4px 10px",fontSize:11,fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"}}>Limpar</button>
+                  <button onClick={()=>setShowAccum(false)} style={{background:"transparent",border:"none",color:C.muted,fontSize:16,cursor:"pointer",padding:"4px 6px"}}>✕</button>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:6}}>
+                {availableMonthKeys.map(m=>{
+                  const sel = selMonths.includes(m.key);
+                  const fmt = new Intl.NumberFormat("pt-BR",{notation:"compact",style:"currency",currency:"BRL"});
+                  return (
+                    <button key={m.key} onClick={()=>m.hasTxs&&toggleSelMonth(m.key)} style={{
+                      padding:"8px 4px",borderRadius:8,fontSize:11,fontWeight:sel?700:400,
+                      fontFamily:"'IBM Plex Sans',sans-serif",cursor:m.hasTxs?"pointer":"default",
+                      background: sel?"#2563eb22":"transparent",
+                      border:`1px solid ${sel?"#3b82f6":C.border}`,
+                      color: sel?"#60a5fa":m.hasTxs?C.soft:C.border,
+                      opacity:m.hasTxs?1:0.35,
+                      display:"flex",flexDirection:"column",alignItems:"center",gap:2
+                    }}>
+                      <span>{m.label}</span>
+                      {m.hasTxs && <span style={{fontSize:9,color:sel?"#60a5fa":C.muted,fontWeight:400}}>{fmt.format(m.tot)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {selMonths.length>0 && (
+                <div style={{marginTop:12,display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12,color:"#3b82f6",fontFamily:"'IBM Plex Sans',sans-serif"}}>🏥 <strong>{new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(accumTotP)}</strong></span>
+                  <span style={{fontSize:12,color:"#0d9488",fontFamily:"'IBM Plex Sans',sans-serif"}}>🩺 <strong>{new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(accumTotA)}</strong></span>
+                  <span style={{fontSize:12,color:C.text,fontFamily:"'IBM Plex Sans',sans-serif",fontWeight:700}}>💰 <strong>{new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(accumTot)}</strong></span>
+                  <button onClick={()=>generateMultiMonthHTML(plantoes,selMonths)} style={{
+                    marginLeft:"auto",background:C.green,color:"#fff",border:"none",
+                    borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:600,
+                    fontFamily:"'IBM Plex Sans',sans-serif",cursor:"pointer"
+                  }}>📤 Exportar {selMonths.length} {selMonths.length===1?"mês":"meses"}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div style={{maxWidth:600,margin:"0 auto",padding:"18px 14px"}}>
           {/* Navigator */}
