@@ -3213,19 +3213,31 @@ const Cartoes = () => {
     const nome = (cartao?.nome || "").toLowerCase();
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-    // ── Nubank: "date","category","title","amount"
-    if (nome.includes("nubank") || lines[0]?.toLowerCase().includes("category") && lines[0]?.toLowerCase().includes("title")) {
+    // ── Nubank: "date","title","amount"  (formato real exportado pelo app)
+    if (nome.includes("nubank") || (lines[0]?.toLowerCase().includes("date") && lines[0]?.toLowerCase().includes("title") && lines[0]?.toLowerCase().includes("amount"))) {
       const txs = []; let limite_total = null; let limite_disponivel = null;
       for (let i=1; i<lines.length; i++) {
-        const cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)?.map(c=>c.replace(/^"|"$/g,"").trim()) || [];
-        if (cols.length < 4) continue;
-        const [rawDate, cat, desc, rawAmt] = cols;
-        const amt = parseFloat(String(rawAmt).replace(",","."));
-        if (!desc || isNaN(amt) || amt <= 0) continue;
-        // date: YYYY-MM-DD
+        // Parsear respeitando aspas: campos podem ter vírgula dentro de aspas
+        const cols = [];
+        let cur = ""; let inQ = false;
+        for (const ch of lines[i]) {
+          if (ch === '"') { inQ = !inQ; }
+          else if (ch === "," && !inQ) { cols.push(cur.trim()); cur = ""; }
+          else { cur += ch; }
+        }
+        cols.push(cur.trim());
+
+        if (cols.length < 3) continue;
+        const rawDate = cols[0];
+        const desc    = cols[1];
+        // amount: pode ser "280,00" ou "- 3.100,48" (pagamento)
+        const rawAmt  = cols[2].replace(/"/g,"").replace(/\./g,"").replace(",",".").trim();
+        const amt     = parseFloat(rawAmt);
+        if (!desc || isNaN(amt)) continue;
+        if (amt <= 0) continue; // ignorar pagamentos (negativos = crédito na fatura)
         const date = rawDate.match(/\d{4}-\d{2}-\d{2}/) ? rawDate.slice(0,10)
           : rawDate.match(/(\d{2})\/(\d{2})\/(\d{4})/) ? rawDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1") : rawDate;
-        txs.push({ date, description: desc, amount: amt, category: mapCategory(cat) });
+        txs.push({ date, description: desc, amount: amt, category: "outros" });
       }
       return { transacoes: txs, limite_total, limite_disponivel };
     }
