@@ -3208,14 +3208,186 @@ const Cartoes = () => {
     setTxs(next); saveCartaoTxs(next);
   };
 
-  // Upload fatura PDF
+  // ── Parsers de CSV por bandeira ──────────────────────────────────────────────
+  const parseCSVFatura = (text, cartao) => {
+    const nome = (cartao?.nome || "").toLowerCase();
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    // ── Nubank: "date","category","title","amount"
+    if (nome.includes("nubank") || lines[0]?.toLowerCase().includes("category") && lines[0]?.toLowerCase().includes("title")) {
+      const txs = []; let limite_total = null; let limite_disponivel = null;
+      for (let i=1; i<lines.length; i++) {
+        const cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)?.map(c=>c.replace(/^"|"$/g,"").trim()) || [];
+        if (cols.length < 4) continue;
+        const [rawDate, cat, desc, rawAmt] = cols;
+        const amt = parseFloat(String(rawAmt).replace(",","."));
+        if (!desc || isNaN(amt) || amt <= 0) continue;
+        // date: YYYY-MM-DD
+        const date = rawDate.match(/\d{4}-\d{2}-\d{2}/) ? rawDate.slice(0,10)
+          : rawDate.match(/(\d{2})\/(\d{2})\/(\d{4})/) ? rawDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1") : rawDate;
+        txs.push({ date, description: desc, amount: amt, category: mapCategory(cat) });
+      }
+      return { transacoes: txs, limite_total, limite_disponivel };
+    }
+
+    // ── PicPay: "Data","Descrição","Valor","Parcela","Categoria"
+    if (nome.includes("picpay") || lines[0]?.toLowerCase().includes("descrição") && lines[0]?.toLowerCase().includes("parcela")) {
+      const txs = [];
+      for (let i=1; i<lines.length; i++) {
+        const cols = lines[i].match(/(".*?"|[^,;]+)(?=[,;]|$)/g)?.map(c=>c.replace(/^"|"$/g,"").trim()) || [];
+        if (cols.length < 3) continue;
+        const rawDate = cols[0]; const desc = cols[1];
+        const rawAmt = String(cols[2]).replace("R$","").replace(".","").replace(",",".").trim();
+        const amt = Math.abs(parseFloat(rawAmt));
+        if (!desc || isNaN(amt) || amt <= 0) continue;
+        const date = rawDate.match(/(\d{2})\/(\d{2})\/(\d{4})/) ? rawDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1")
+          : rawDate.match(/\d{4}-\d{2}-\d{2}/) ? rawDate.slice(0,10) : rawDate;
+        const cat = cols[4] || "outros";
+        txs.push({ date, description: desc, amount: amt, category: mapCategory(cat) });
+      }
+      return { transacoes: txs, limite_total: null, limite_disponivel: null };
+    }
+
+    // ── Next / genérico: tentar detectar automaticamente
+    const txs = [];
+    for (let i=1; i<lines.length; i++) {
+      const cols = lines[i].split(/[,;]/).map(c=>c.replace(/^"|"$/g,"").trim());
+      if (cols.length < 3) continue;
+      // Procurar coluna de data, descrição e valor
+      const dateCol = cols.find(c => c.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/));
+      if (!dateCol) continue;
+      const amtRaw = cols.reverse().find(c => c.match(/[\d,.]+/));
+      const amt = Math.abs(parseFloat(String(amtRaw||"").replace("R$","").replace(".","").replace(",",".")));
+      if (!amtRaw || isNaN(amt) || amt <= 0) continue;
+      cols.reverse();
+      const dateIdx = cols.findIndex(c => c.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/));
+      const desc = cols.slice(dateIdx+1).find(c=>c.length>3 && !c.match(/^[\d,.R$]+$/)) || "Lançamento";
+      const date = dateCol.match(/(\d{2})\/(\d{2})\/(\d{4})/) ? dateCol.replace(/(\d{2})\/(\d{2})\/(\d{4})/,"$3-$2-$1") : dateCol.slice(0,10);
+      txs.push({ date, description: desc, amount: amt, category: "outros" });
+    }
+    return { transacoes: txs, limite_total: null, limite_disponivel: null };
+  };
+
+  // Mapeia categorias do CSV para as categorias do app
+  const mapCategory = (cat) => {
+    const c = (cat||"").toLowerCase();
+    if (c.includes("restaurante")||c.includes("food")||c.includes("aliment")||c.includes("lanche")) return "restaurante";
+    if (c.includes("supermercado")||c.includes("mercado")||c.includes("hortifruti")) return "supermercado";
+    if (c.includes("farmácia")||c.includes("farmacia")||c.includes("drogaria")||c.includes("saúde")||c.includes("saude")) return "farmacia";
+    if (c.includes("transporte")||c.includes("uber")||c.includes("99")||c.includes("posto")||c.includes("gasolina")) return "transporte";
+    if (c.includes("educação")||c.includes("educacao")||c.includes("escola")||c.includes("curso")) return "educacao";
+    if (c.includes("lazer")||c.includes("entretenimento")||c.includes("cinema")||c.includes("streaming")) return "lazer";
+    if (c.includes("vestuário")||c.includes("vestuario")||c.includes("roupa")||c.includes("calçado")) return "vestuario";
+    if (c.includes("viagem")||c.includes("hotel")||c.includes("hospedagem")||c.includes("aéreo")) return "lazer";
+    if (c.includes("serviço")||c.includes("servico")||c.includes("assinatura")||c.includes("recorrente")) return "financeiro";
+    if (c.includes("compras")||c.includes("shopping")) return "outros";
+    return "outros";
+  };
+
+  // Upload fatura PDF ou CSV
   const handleFaturaUpload = async (e, cartaoId) => {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
-    setUpStatus("📄 Lendo fatura PDF...");
 
     try {
+      const cartao = cartoes.find(c => c.id === cartaoId);
+      const isCSV = file.name.toLowerCase().endsWith(".csv") || file.type === "text/csv";
+
+      // ── CSV ──────────────────────────────────────────────────────────────────
+      if (isCSV) {
+        setUpStatus("📊 Lendo CSV da fatura...");
+        const text = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = rej;
+          r.readAsText(file, "UTF-8");
+        });
+
+        const parsed = parseCSVFatura(text, cartao);
+
+        // Se CSV simples (sem IA), classificar com IA apenas se tiver categorias "outros"
+        const needsAI = parsed.transacoes.some(t => t.category === "outros");
+        let finalParsed = parsed;
+
+        if (needsAI && parsed.transacoes.length > 0) {
+          setUpStatus("🤖 IA classificando categorias...");
+          const txSummary = parsed.transacoes.map(t => `${t.date}|${t.description}|${t.amount}`).join("\n");
+          try {
+            const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 3000,
+                messages: [{ role: "user", content:
+`Classifique cada transação com uma categoria. Retorne SOMENTE JSON sem markdown.
+Formato: [{"idx":0,"category":"categoria"},{"idx":1,"category":"categoria"},...]
+Categorias: alimentacao, supermercado, restaurante, padaria, farmacia, saude, transporte, gasolina, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
+
+Transações (formato data|descrição|valor):
+${txSummary}
+
+Responda APENAS o array JSON:`
+                }]
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const aiText = data.content?.[0]?.text || "";
+              const match = aiText.match(/\[[\s\S]*\]/);
+              if (match) {
+                const cats = JSON.parse(match[0]);
+                cats.forEach(({ idx, category }) => {
+                  if (parsed.transacoes[idx]) parsed.transacoes[idx].category = category;
+                });
+              }
+            }
+          } catch(e) { console.warn("AI classification failed:", e); }
+        }
+
+        // Atualizar limite se veio no CSV
+        if (parsed.limite_total && cartaoId) {
+          setCartoes(prev => {
+            const next = prev.map(c => c.id===cartaoId ? {
+              ...c,
+              limite: parsed.limite_total,
+              limiteDisponivel: parsed.limite_disponivel,
+              limiteUtilizado: parsed.limite_utilizado,
+            } : c);
+            saveCartoes(next);
+            return next;
+          });
+        }
+
+        // Montar transações e deduplificar
+        const newTxs = parsed.transacoes.map(t => ({
+          id: "cctx_" + Math.random().toString(36).slice(2),
+          cartaoId: cartaoId || cartoes[0]?.id,
+          date: t.date,
+          description: String(t.description).trim(),
+          amount: -Math.abs(parseFloat(t.amount) || 0),
+          category: t.category || "outros",
+          notes: "",
+          spender: "",
+        })).filter(t => t.description && t.amount !== 0);
+
+        const deduped = newTxs.filter(n => !txs.some(t =>
+          t.cartaoId===n.cartaoId && t.date===n.date &&
+          Math.abs(t.amount)===Math.abs(n.amount) &&
+          t.description.toLowerCase()===n.description.toLowerCase()
+        ));
+
+        const next = [...deduped, ...txs];
+        setTxs(next); saveCartaoTxs(next);
+        setUpStatus(`✅ ${deduped.length} transações importadas do CSV!`);
+        setUploading(false);
+        return;
+      }
+
+      // ── PDF ──────────────────────────────────────────────────────────────────
+      setUpStatus("📄 Lendo fatura PDF...");
+
       // Load pdf.js
       if (!window.pdfjsLib) {
         await new Promise((resolve, reject) => {
@@ -3263,6 +3435,7 @@ const Cartoes = () => {
 Formato:
 {
   "limite_total": numero_ou_null,
+  "limite_utilizado": numero_ou_null,
   "limite_disponivel": numero_ou_null,
   "valor_fatura": numero_ou_null,
   "transacoes": [{"date":"YYYY-MM-DD","description":"texto","amount":numero_positivo,"category":"categoria"}]
@@ -3296,7 +3469,12 @@ Responda APENAS o objeto JSON:`
       // Update limite if found
       if (parsed.limite_total && cartaoId) {
         setCartoes(prev => {
-          const next = prev.map(c => c.id===cartaoId ? {...c, limite:parsed.limite_total, limiteDisponivel:parsed.limite_disponivel} : c);
+          const next = prev.map(c => c.id===cartaoId ? {
+            ...c,
+            limite: parsed.limite_total,
+            limiteUtilizado: parsed.limite_utilizado ?? null,
+            limiteDisponivel: parsed.limite_disponivel,
+          } : c);
           saveCartoes(next);
           return next;
         });
@@ -3311,6 +3489,7 @@ Responda APENAS o objeto JSON:`
         amount: -Math.abs(parseFloat(t.amount)||0),
         category: t.category || "outros",
         notes: "",
+        spender: "",
       })).filter(t => t.description && t.amount !== 0);
 
       // Dedup
@@ -3537,25 +3716,34 @@ Responda APENAS o objeto JSON:`
                     </div>
                     {c.limite > 0 && (
                       <div>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                          <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Limite usado: {brl(gasto)} / {brl(c.limite)}</span>
-                          <span style={{fontSize:12,fontFamily:"'DM Sans',sans-serif",color:pctUsado>80?C.red:pctUsado>60?C.gold:C.green}}>{Math.round(pctUsado)}%</span>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                          <span style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",letterSpacing:"0.5px",textTransform:"uppercase"}}>Limite</span>
+                          <span style={{fontSize:12,fontFamily:"'DM Sans',sans-serif",color:pctUsado>80?C.red:pctUsado>60?C.gold:C.green,fontWeight:600}}>{Math.round(pctUsado)}% usado</span>
                         </div>
-                        <div style={{height:8,background:C.border,borderRadius:8}}>
+                        <div style={{height:7,background:C.border,borderRadius:8,marginBottom:8}}>
                           <div style={{height:"100%",width:`${pctUsado}%`,background:pctUsado>80?C.red:pctUsado>60?C.gold:C.green,borderRadius:8,transition:"width .5s"}}/>
                         </div>
-                        {limDisp !== null && (
-                          <div style={{marginTop:6,fontSize:12,color:C.green,fontFamily:"'DM Sans',sans-serif"}}>
-                            💳 Limite disponível: {brl(limDisp)}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                          <div style={{background:C.surface,borderRadius:8,padding:"7px 10px",textAlign:"center"}}>
+                            <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:2}}>Total</div>
+                            <div style={{fontSize:12,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.text}}>{brl(c.limite)}</div>
                           </div>
-                        )}
+                          <div style={{background:C.surface,borderRadius:8,padding:"7px 10px",textAlign:"center"}}>
+                            <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:2}}>Utilizado</div>
+                            <div style={{fontSize:12,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:pctUsado>80?C.red:pctUsado>60?C.gold:C.text}}>{brl(c.limiteUtilizado ?? gasto)}</div>
+                          </div>
+                          <div style={{background:C.surface,borderRadius:8,padding:"7px 10px",textAlign:"center"}}>
+                            <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:2}}>Disponível</div>
+                            <div style={{fontSize:12,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.green}}>{brl(limDisp !== null ? limDisp : c.limite - gasto)}</div>
+                          </div>
+                        </div>
                       </div>
                     )}
                     {/* Upload buttons */}
                     <div style={{display:"flex",gap:8,marginTop:14}}>
                       <label style={{flex:1,background:C.border,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"8px",fontSize:12,fontFamily:"'DM Sans',sans-serif",cursor:"pointer",textAlign:"center",display:"block"}}>
-                        📄 Subir fatura
-                        <input type="file" accept=".pdf" style={{display:"none"}} onChange={e=>handleFaturaUpload(e,c.id)} disabled={uploading}/>
+                        📄 Fatura PDF/CSV
+                        <input type="file" accept=".pdf,.csv,text/csv" style={{display:"none"}} onChange={e=>handleFaturaUpload(e,c.id)} disabled={uploading}/>
                       </label>
                       <label style={{flex:1,background:C.border,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"8px",fontSize:12,fontFamily:"'DM Sans',sans-serif",cursor:"pointer",textAlign:"center",display:"block"}}>
                         🧾 Subir comprovante
