@@ -718,25 +718,31 @@ const BarChart = ({ data, height=160 }) => {
 function exportPDF(transactions, accounts, period, year, cashBal) {
   const acc  = (id) => accounts.find(a => a.id === id) || { name: id, owner: "" };
   const brlF = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+  const MONTH_NAMES_PT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
   // ── Dados de contas ─────────────────────────────────────────────────────────
-  const owners = [
-    { key: "rodrigo", label: "👨 Rodrigo", color: "#7c6dc9" },
-    { key: "claudia", label: "👩 Cláudia",  color: "#c96da0" },
-    { key: "casal",   label: "💑 Casal",    color: "#4caf82" },
-  ];
   const accountsTotal = accounts.reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
   const cashTotal     = parseFloat(cashBal) || 0;
   const grandTotal    = accountsTotal + cashTotal;
 
-  // ── Filtrar por período ──────────────────────────────────────────────────────
-  const periodLabel = period
-    ? new Date(period + "-01").toLocaleDateString("pt-BR", { month: "long", year: "numeric" })
-    : `Ano ${year || new Date().getFullYear()}`;
-  const filterKey = period || year || String(new Date().getFullYear());
-  const txs = transactions
-    .filter(t => t.date.startsWith(filterKey) && !t.internalTransfer)
-    .sort((a, b) => b.date.localeCompare(a.date));
+  // ── Filtrar por período — suporta array de meses, string de mês, ou ano ────
+  let periodLabel, txs;
+  if (Array.isArray(period) && period.length > 0) {
+    // Array de chaves de mês: ["2026-01","2026-02",...]
+    const sorted = [...period].sort();
+    periodLabel = sorted.map(k => MONTH_NAMES_PT[parseInt(k.split("-")[1])-1] + "/" + k.split("-")[0].slice(2)).join(" + ");
+    txs = transactions.filter(t => period.some(k => t.date.startsWith(k)) && !t.internalTransfer)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  } else if (period && !Array.isArray(period)) {
+    periodLabel = new Date(period + "-01").toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    txs = transactions.filter(t => t.date.startsWith(period) && !t.internalTransfer)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  } else {
+    const y = year || String(new Date().getFullYear());
+    periodLabel = `Ano ${y}`;
+    txs = transactions.filter(t => t.date.startsWith(y) && !t.internalTransfer)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
 
   const despesas = txs.filter(t => t.amount < 0);
   const receitas = txs.filter(t => t.amount > 0);
@@ -943,9 +949,25 @@ function exportCSV(transactions, accounts, period) {
 }
 
 // ─── RELATORIOS ───────────────────────────────────────────────────────────────
+const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
 const Relatorios = ({ transactions, accounts, cashBal }) => {
-  const [tab, setTab] = useState("tendencia"); // tendencia | categorias | pessoa | mensal
-  const [year, setYear] = useState(String(TODAY.getFullYear()));
+  const [tab, setTab]           = useState("tendencia");
+  const [year, setYear]         = useState(String(TODAY.getFullYear()));
+  const [selMonths, setSelMonths] = useState([]);   // meses selecionados para acumulado
+  const [showAccum, setShowAccum] = useState(false); // painel de seleção aberto
+
+  const toggleMonth = (key) => setSelMonths(s => s.includes(key) ? s.filter(k=>k!==key) : [...s, key]);
+  const clearAccum  = () => { setSelMonths([]); setShowAccum(false); };
+
+  // Transações dos meses selecionados (acumulado) ou ano inteiro
+  const accumTxs = selMonths.length > 0
+    ? transactions.filter(t => selMonths.some(k => t.date.startsWith(k)) && !t.internalTransfer)
+    : null;
+
+  const accumLabel = selMonths.length > 0
+    ? selMonths.sort().map(k => MONTH_NAMES[parseInt(k.split("-")[1])-1]+"/"+k.split("-")[0].slice(2)).join(" + ")
+    : null;
 
   // Build monthly summaries for selected year
   const months = Array.from({length:12},(_,i)=>{
@@ -1006,6 +1028,7 @@ const Relatorios = ({ transactions, accounts, cashBal }) => {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
       {/* Header controls */}
+      {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
         <div style={{ display:"flex", gap:2 }}>
           {tabBtn("tendencia","📈 Tendência")}
@@ -1013,20 +1036,100 @@ const Relatorios = ({ transactions, accounts, cashBal }) => {
           {tabBtn("pessoa","👥 Por Pessoa")}
           {tabBtn("mensal","📅 Mensal")}
         </div>
-        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-          <select style={{ ...IS, width:"auto", fontSize:12 }} value={year} onChange={e=>setYear(e.target.value)}>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <select style={{ ...IS, width:"auto", fontSize:12 }} value={year} onChange={e=>{ setYear(e.target.value); setSelMonths([]); }}>
             {[0,1,2].map(d=>{ const y=String(TODAY.getFullYear()-d); return <option key={y} value={y}>{y}</option>; })}
           </select>
+          <button onClick={()=>setShowAccum(s=>!s)} style={{
+            background: selMonths.length>0 ? C.gold+"33" : "transparent",
+            border:`1px solid ${selMonths.length>0 ? C.gold : C.border}`,
+            color: selMonths.length>0 ? C.goldLight : C.soft,
+            borderRadius:8, padding:"8px 14px", fontSize:12,
+            fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+          }}>
+            Σ {selMonths.length>0 ? `${selMonths.length} meses` : "Somar meses"}
+          </button>
+          {selMonths.length>0 && (
+            <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal)} style={{
+              background:"#4caf82", border:"none", color:"#fff", borderRadius:8,
+              padding:"8px 14px", fontSize:12, fontWeight:600,
+              fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+            }}>📄 Exportar seleção</button>
+          )}
           <button onClick={()=>exportCSV(transactions,accounts,null)} style={{
             background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
-            padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
+            padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
           }}>⬇ CSV</button>
           <button onClick={()=>exportPDF(transactions,accounts,null,year,cashBal)} style={{
             background:C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
-            padding:"8px 16px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer", display:"flex", alignItems:"center", gap:6
-          }}>📄 Exportar Relatório</button>
+            padding:"8px 16px", fontSize:12, fontWeight:600,
+            fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+          }}>📄 Exportar ano</button>
         </div>
       </div>
+
+      {/* Seletor de meses */}
+      {showAccum && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:20 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <div style={{ fontSize:13, color:C.text, fontFamily:"'Cormorant Garamond',serif", fontSize:17 }}>
+              Selecionar meses para somar
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setSelMonths(months.filter(m=>m.txs.length>0).map(m=>m.key))} style={{
+                background:"transparent", border:`1px solid ${C.border}`, color:C.muted,
+                borderRadius:6, padding:"5px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+              }}>Todos</button>
+              <button onClick={clearAccum} style={{
+                background:"transparent", border:`1px solid ${C.border}`, color:C.muted,
+                borderRadius:6, padding:"5px 12px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+              }}>Limpar</button>
+              <button onClick={()=>setShowAccum(false)} style={{
+                background:"transparent", border:"none", color:C.muted,
+                borderRadius:6, padding:"5px 8px", fontSize:14, cursor:"pointer"
+              }}>✕</button>
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:8 }}>
+            {months.map(m => {
+              const sel = selMonths.includes(m.key);
+              const hasTxs = m.txs.length > 0;
+              return (
+                <button key={m.key} onClick={()=>hasTxs&&toggleMonth(m.key)} style={{
+                  padding:"10px 4px", borderRadius:8, fontSize:12, fontWeight:sel?600:400,
+                  fontFamily:"'DM Sans',sans-serif", cursor:hasTxs?"pointer":"default",
+                  background: sel ? C.gold+"33" : "transparent",
+                  border:`1px solid ${sel ? C.gold : C.border}`,
+                  color: sel ? C.goldLight : hasTxs ? C.soft : C.border,
+                  opacity: hasTxs ? 1 : 0.4,
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:2
+                }}>
+                  <span>{m.label}</span>
+                  {hasTxs && <span style={{ fontSize:9, color: sel?C.gold:C.muted }}>{brl(m.des).replace("R$","").trim()}</span>}
+                </button>
+              );
+            })}
+          </div>
+          {selMonths.length>0 && (
+            <div style={{ marginTop:14, display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
+              {(()=>{ 
+                const rec = accumTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+                const des = accumTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+                return (<>
+                  <span style={{ fontSize:12, color:C.green, fontFamily:"'DM Sans',sans-serif" }}>📈 Receitas: <strong>{brl(rec)}</strong></span>
+                  <span style={{ fontSize:12, color:C.red,   fontFamily:"'DM Sans',sans-serif" }}>📉 Despesas: <strong>{brl(des)}</strong></span>
+                  <span style={{ fontSize:12, color:rec-des>=0?C.goldLight:C.red, fontFamily:"'DM Sans',sans-serif" }}>💰 Saldo: <strong>{brl(rec-des)}</strong></span>
+                  <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal)} style={{
+                    marginLeft:"auto", background:"#4caf82", border:"none", color:"#fff", borderRadius:8,
+                    padding:"8px 18px", fontSize:12, fontWeight:600,
+                    fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+                  }}>📄 Exportar {selMonths.length} {selMonths.length===1?"mês":"meses"}</button>
+                </>);
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* KPIs do ano */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
