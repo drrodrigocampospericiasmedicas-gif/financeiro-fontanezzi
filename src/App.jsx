@@ -3441,7 +3441,10 @@ const Cartoes = () => {
           r.readAsText(file, "UTF-8");
         });
 
+        console.log("[CSV DEBUG] text preview:", text.slice(0,200));
+        console.log("[CSV DEBUG] cartao:", cartao);
         const parsed = parseCSVFatura(text, cartao);
+        console.log("[CSV DEBUG] parsed:", parsed);
 
         // Se CSV simples (sem IA), classificar com IA apenas se tiver categorias "outros"
         const needsAI = parsed.transacoes.some(t => t.category === "outros");
