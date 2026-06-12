@@ -3441,10 +3441,16 @@ const Cartoes = () => {
           r.readAsText(file, "UTF-8");
         });
 
-        console.log("[CSV DEBUG] text preview:", text.slice(0,200));
-        console.log("[CSV DEBUG] cartao:", cartao);
         const parsed = parseCSVFatura(text, cartao);
-        console.log("[CSV DEBUG] parsed:", parsed);
+        if (parsed.transacoes.length === 0) {
+          // Mostrar diagnóstico direto na tela (sem precisar do console)
+          alert(
+            "DEBUG CSV:\n\n" +
+            "Cartão: " + (cartao?.nome || "(não encontrado, id="+cartaoId+")") + "\n\n" +
+            "Primeiras linhas do arquivo:\n" + text.split(/\r?\n/).slice(0,4).join("\n") + "\n\n" +
+            "Tamanho do texto: " + text.length + " chars"
+          );
+        }
 
         // Se CSV simples (sem IA), classificar com IA apenas se tiver categorias "outros"
         const needsAI = parsed.transacoes.some(t => t.category === "outros");
