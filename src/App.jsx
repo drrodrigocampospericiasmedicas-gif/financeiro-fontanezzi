@@ -84,6 +84,7 @@ const DEFAULT_CATEGORIES = [
   { id: "taxas",         label: "Taxas Bancárias",icon: "🏛️", color: "#636e72" },
   { id: "transferencia", label: "Transferência", icon: "🔄",  color: "#6b6f7d" },
   { id: "receita",       label: "Receita",       icon: "💰",  color: "#4caf82" },
+  { id: "salario_claudia", label: "Salário Cláudia", icon: "👩‍💼", color: "#c96da0" },
   { id: "consulta_particular", label: "Consulta Particular", icon: "🩺", color: "#27ae60" },
   { id: "planos_ortasso",      label: "Planos/Ort. Asso",    icon: "📋", color: "#16a085" },
   { id: "fat_olade",            label: "Fat. Olade",          icon: "🧾", color: "#1abc9c" },
@@ -411,7 +412,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
 
 async function classifyTx(description) {
   const text = await callClaude(
-    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, padaria, feira, supermercado, restaurante, farmacia, transporte, gasolina, aluguel_carro, saude, educacao, lazer, moradia, aluguel, condominio, agua, luz, celular, celular_daniel, vestuario, financeiro, pagamento_cartao, empregada, bela, trabalho, divida, taxas, transferencia, receita, consulta_particular, planos_ortasso, fat_olade, laudos, trf, trt, pag_sjc, outras_receitas, outros\n\nDicas: consulta_particular=consulta médica particular/honorário paciente, planos_ortasso=plano de saúde/convênio ortopédico/associação, fat_olade=Olade/faturamento Olade, laudos=laudo médico/perícia/RM/RX, trf=TRF/Tribunal Regional Federal/perícia federal, trt=TRT/Tribunal Regional do Trabalho/perícia trabalhista, pag_sjc=pagamento SJC, outras_receitas=outras receitas/depósitos diversos, pagamento_cartao=pagamento de fatura de cartão de crédito (Nubank/PicPay/Next/Itaú/Mastercard), feira=feira livre/hortifruti/sacolão, padaria=padaria/pão/bakery, gasolina=posto/combustível, aluguel_carro=locadora/hertz/localiza, aluguel=aluguel imóvel, condominio=condomínio, agua=saneamento/cedae/sabesp, luz=energia/enel/cemig/light, celular=tim/claro/vivo/oi celular casal, celular_daniel=celular daniel/filho, supermercado=mercado/carrefour, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, padaria, feira, supermercado, restaurante, farmacia, transporte, gasolina, aluguel_carro, saude, educacao, lazer, moradia, aluguel, condominio, agua, luz, celular, celular_daniel, vestuario, financeiro, pagamento_cartao, empregada, bela, trabalho, divida, taxas, transferencia, receita, salario_claudia, consulta_particular, planos_ortasso, fat_olade, laudos, trf, trt, pag_sjc, outras_receitas, outros\n\nDicas: salario_claudia=salário/pagamento de Cláudia, consulta_particular=consulta médica particular/honorário paciente, planos_ortasso=plano de saúde/convênio ortopédico/associação, fat_olade=Olade/faturamento Olade, laudos=laudo médico/perícia/RM/RX, trf=TRF/Tribunal Regional Federal/perícia federal, trt=TRT/Tribunal Regional do Trabalho/perícia trabalhista, pag_sjc=pagamento SJC, outras_receitas=outras receitas/depósitos diversos, pagamento_cartao=pagamento de fatura de cartão de crédito (Nubank/PicPay/Next/Itaú/Mastercard), feira=feira livre/hortifruti/sacolão, padaria=padaria/pão/bakery, gasolina=posto/combustível, aluguel_carro=locadora/hertz/localiza, aluguel=aluguel imóvel, condominio=condomínio, agua=saneamento/cedae/sabesp, luz=energia/enel/cemig/light, celular=tim/claro/vivo/oi celular casal, celular_daniel=celular daniel/filho, supermercado=mercado/carrefour, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
   );
   const id = text.trim().toLowerCase();
   return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
@@ -2239,7 +2240,7 @@ const Metas = ({ transactions }) => {
   const byCat  = {};
   thisM.forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
 
-  const spendable = DEFAULT_CATEGORIES.filter(c=>!["receita","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id));
+  const spendable = DEFAULT_CATEGORIES.filter(c=>!["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id));
 
   const saveGoal = (id) => {
     const val = parseFloat(draft.replace(",","."));
@@ -2898,7 +2899,7 @@ const Carteira = ({ accounts, onCashChange }) => {
               <div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>CATEGORIA</div>
                 <select style={IS} value={form.category} onChange={e=>sf("category",e.target.value)}>
-                  {DEFAULT_CATEGORIES.filter(c=>!["receita","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id)).map(c=>(
+                  {DEFAULT_CATEGORIES.filter(c=>!["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id)).map(c=>(
                     <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
                   ))}
                 </select>
