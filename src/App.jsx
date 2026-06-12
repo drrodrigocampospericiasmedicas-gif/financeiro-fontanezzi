@@ -2521,6 +2521,38 @@ const Carteira = ({ accounts, onCashChange }) => {
   const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
   const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: parseFloat(tx.amount) >= 0 ? "entrada" : "saida", amount: Math.abs(parseFloat(tx.amount)).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
 
+  // ── Ajustar saldo de dinheiro diretamente (sem criar lançamento manual) ─────
+  const [showAdjust, setShowAdjust] = useState(false);
+  const [adjustVal, setAdjustVal]   = useState("");
+  const [adjustOwner, setAdjustOwner] = useState("casal");
+
+  const openAdjust = () => { setAdjustVal(cashBalance.toFixed(2).replace(".",",")); setAdjustOwner("casal"); setShowAdjust(true); };
+
+  const handleAdjust = async () => {
+    const newTotal = parseFloat(adjustVal.replace(",","."));
+    if (isNaN(newTotal)) return;
+    const diff = newTotal - cashBalance;
+    if (Math.abs(diff) < 0.005) { setShowAdjust(false); return; } // sem mudança
+
+    const tx = {
+      id: "cash_adj_" + Date.now(),
+      date: fmt(TODAY),
+      description: "Ajuste de saldo",
+      amount: diff,
+      type: diff >= 0 ? "entrada" : "saida",
+      category: "outros",
+      notes: "Ajuste manual do saldo em dinheiro",
+      owner: adjustOwner,
+    };
+
+    const next = [tx, ...cashTxs];
+    setCashTxs(next);
+    const tbl = await dbFrom("cash_transactions");
+    if (tbl) await tbl.insert(tx);
+    setShowAdjust(false);
+    if (onCashChange) onCashChange();
+  };
+
   const handleSave = async () => {
     if (!form.description.trim() || !form.amount) return;
     const amt = parseFloat(form.amount.replace(",", "."));
@@ -2664,10 +2696,16 @@ const Carteira = ({ accounts, onCashChange }) => {
               </div>
               <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>total somado</div>
             </div>
-            <button onClick={openNew} style={{
-              background: C.gold, color: C.bg, border: "none", borderRadius: 8,
-              padding: "9px 16px", fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans',sans-serif", cursor: "pointer"
-            }}>+ Lançar</button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={openAdjust} style={{
+                background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8,
+                padding: "9px 14px", fontSize: 12, fontWeight: 500, fontFamily: "'DM Sans',sans-serif", cursor: "pointer"
+              }}>✏️ Ajustar saldo</button>
+              <button onClick={openNew} style={{
+                background: C.gold, color: C.bg, border: "none", borderRadius: 8,
+                padding: "9px 16px", fontSize: 12, fontWeight: 600, fontFamily: "'DM Sans',sans-serif", cursor: "pointer"
+              }}>+ Lançar</button>
+            </div>
           </div>
 
           {/* Por pessoa */}
@@ -2720,6 +2758,65 @@ const Carteira = ({ accounts, onCashChange }) => {
       </div>
 
       {/* ── FORM DINHEIRO ────────────────────────────────────────── */}
+      {showAdjust && (
+        <div style={{ position: "fixed", inset: 0, background: "#000b", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 150 }}>
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 36, width: 400, maxWidth: "95vw" }}>
+            <div style={{ fontSize: 22, fontFamily: "'Cormorant Garamond',serif", color: C.text, marginBottom: 8 }}>
+              Ajustar saldo em dinheiro
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginBottom: 22, lineHeight: 1.5 }}>
+              Informe o valor total que você tem em espécie agora. O sistema calcula a diferença e registra automaticamente um ajuste — sem precisar lançar entrada ou saída manualmente.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>SALDO ATUAL</div>
+                <div style={{ fontSize: 18, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.soft }}>{brl(cashBalance)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>NOVO SALDO TOTAL (R$)</div>
+                <input
+                  style={IS}
+                  placeholder="0,00"
+                  value={adjustVal}
+                  onChange={e => setAdjustVal(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>ATRIBUIR DIFERENÇA A</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["rodrigo","👨 Rodrigo","#7c6dc9"],["claudia","👩 Cláudia","#c96da0"],["casal","💑 Casal","#4caf82"]].map(([key,label,color])=>(
+                    <button key={key} onClick={()=>setAdjustOwner(key)} style={{
+                      flex:1, padding:"9px 0", borderRadius:8, fontSize:12, fontWeight:500,
+                      fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+                      background: adjustOwner===key ? color+"22" : "transparent",
+                      border:`1px solid ${adjustOwner===key ? color : C.border}`,
+                      color: adjustOwner===key ? color : C.muted
+                    }}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              {(() => {
+                const newTotal = parseFloat(adjustVal.replace(",","."));
+                if (isNaN(newTotal)) return null;
+                const diff = newTotal - cashBalance;
+                if (Math.abs(diff) < 0.005) return null;
+                return (
+                  <div style={{ fontSize: 12, color: diff>=0?C.green:C.red, fontFamily: "'DM Sans',sans-serif", background: C.surface, borderRadius:8, padding:"10px 12px" }}>
+                    {diff>=0 ? "Será lançada uma entrada de " : "Será lançada uma saída de "}
+                    <strong>{brl(Math.abs(diff))}</strong> para ajustar o saldo.
+                  </div>
+                );
+              })()}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+              <button onClick={handleAdjust} style={{ flex: 1, background: C.gold, color: C.bg, border: "none", borderRadius: 8, padding: "12px", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans',sans-serif", cursor: "pointer" }}>Salvar ajuste</button>
+              <button onClick={()=>setShowAdjust(false)} style={{ background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 20px", fontSize: 13, fontFamily: "'DM Sans',sans-serif", cursor: "pointer" }}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <div style={{ position: "fixed", inset: 0, background: "#000b", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 150 }}>
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 36, width: 440, maxWidth: "95vw" }}>
