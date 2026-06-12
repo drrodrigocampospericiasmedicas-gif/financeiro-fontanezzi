@@ -3052,8 +3052,8 @@ const Dividas = () => {
 };
 
 // ─── CARTÕES DE CRÉDITO ───────────────────────────────────────────────────────
-const CARTOES_KEY = "fontanezzi_cartoes";
-const CARTAO_TXS_KEY = "fontanezzi_cartao_txs";
+const CARTOES_KEY = "fontanezzi_cartoes";       // fallback local
+const CARTAO_TXS_KEY = "fontanezzi_cartao_txs"; // fallback local
 
 // Helpers locais
 const loadCartoes = () => { try { return JSON.parse(localStorage.getItem(CARTOES_KEY)) || []; } catch { return []; } };
@@ -3162,8 +3162,14 @@ const CartaoTxForm = ({ cartoes, initial, onSave, onClose }) => {
 
 // ─── CARTÕES MAIN COMPONENT ───────────────────────────────────────────────────
 const Cartoes = () => {
-  const [cartoes, setCartoes]       = useState(() => loadCartoes());
-  const [txs, setTxs]               = useState(() => loadCartaoTxs());
+  const [cartoes, setCartoes]       = useState([]);
+  const [txs, setTxsState]          = useState([]);
+  const txsRef = useRef([]);
+  const setTxs = (val) => {
+    const next = typeof val === "function" ? val(txsRef.current) : val;
+    txsRef.current = next;
+    setTxsState(next);
+  };
   const [showCartaoForm, setShowCC] = useState(false);
   const [editCartao, setEditCC]     = useState(null);
   const [showTxForm, setShowTx]     = useState(false);
@@ -3173,6 +3179,7 @@ const Cartoes = () => {
   const [uploading, setUploading]   = useState(false);
   const [uploadStatus, setUpStatus] = useState("");
   const [tab, setTab]               = useState("resumo"); // resumo | lancamentos | cartoes
+  const [loadingCC, setLoadingCC]   = useState(true);
   const toastRef = useRef(null);
 
   const showToast = (msg) => {
@@ -3181,31 +3188,149 @@ const Cartoes = () => {
     toastRef.current = setTimeout(() => setUpStatus(""), 3000);
   };
 
-  const saveCC = (c) => {
-    const next = cartoes.find(x=>x.id===c.id) ? cartoes.map(x=>x.id===c.id?c:x) : [...cartoes,c];
-    setCartoes(next); saveCartoes(next);
+  // ── Carregar do Supabase (com fallback/migração do localStorage) ────────────
+  useEffect(() => {
+    const load = async () => {
+      setLoadingCC(true);
+      const [ccTbl, txTbl] = await Promise.all([dbFrom("cartoes"), dbFrom("cartao_transactions")]);
+
+      let ccData = [];
+      if (ccTbl) {
+        const res = await ccTbl.select("*", "&order=created_at.asc");
+        ccData = res?.data || [];
+      }
+      // Migração: se Supabase vazio mas há dados locais, sobe pro Supabase
+      if (ccData.length === 0) {
+        const local = loadCartoes();
+        if (local.length > 0 && ccTbl) {
+          await Promise.all(local.map(c => ccTbl.insert({
+            id: c.id, nome: c.nome, bandeira: c.bandeira, owner: c.owner,
+            limite: c.limite || 0, vencimento: c.vencimento || null, cor: c.cor,
+            limite_utilizado: c.limiteUtilizado ?? null, limite_disponivel: c.limiteDisponivel ?? null,
+          })));
+          ccData = local.map(c => ({
+            id: c.id, nome: c.nome, bandeira: c.bandeira, owner: c.owner,
+            limite: c.limite || 0, vencimento: c.vencimento, cor: c.cor,
+            limite_utilizado: c.limiteUtilizado ?? null, limite_disponivel: c.limiteDisponivel ?? null,
+          }));
+        }
+      }
+      setCartoes(ccData.map(c => ({
+        id: c.id, nome: c.nome, bandeira: c.bandeira, owner: c.owner,
+        limite: parseFloat(c.limite) || 0, vencimento: c.vencimento, cor: c.cor,
+        limiteUtilizado: c.limite_utilizado != null ? parseFloat(c.limite_utilizado) : null,
+        limiteDisponivel: c.limite_disponivel != null ? parseFloat(c.limite_disponivel) : null,
+      })));
+
+      let txData = [];
+      if (txTbl) {
+        const res = await txTbl.select("*", "&order=date.desc");
+        txData = res?.data || [];
+      }
+      if (txData.length === 0) {
+        const local = loadCartaoTxs();
+        if (local.length > 0 && txTbl) {
+          await Promise.all(local.map(t => txTbl.insert({
+            id: t.id, cartao_id: t.cartaoId, date: t.date, description: t.description,
+            amount: t.amount, category: t.category || "outros", notes: t.notes || "",
+            spender: t.spender || "",
+          })));
+          txData = local.map(t => ({
+            id: t.id, cartao_id: t.cartaoId, date: t.date, description: t.description,
+            amount: t.amount, category: t.category || "outros", notes: t.notes || "", spender: t.spender || "",
+          }));
+        }
+      }
+      setTxs(txData.map(t => ({
+        id: t.id, cartaoId: t.cartao_id, date: t.date, description: t.description,
+        amount: parseFloat(t.amount), category: t.category || "outros",
+        notes: t.notes || "", spender: t.spender || "",
+      })));
+      setLoadingCC(false);
+    };
+    load();
+  }, []);
+
+  const saveCC = async (c) => {
+    const exists = cartoes.find(x=>x.id===c.id);
+    const next = exists ? cartoes.map(x=>x.id===c.id?c:x) : [...cartoes,c];
+    setCartoes(next);
     setShowCC(false); setEditCC(null);
     showToast("✅ Cartão salvo!");
+
+    const tbl = await dbFrom("cartoes");
+    if (!tbl) return;
+    const dbRow = {
+      nome: c.nome, bandeira: c.bandeira, owner: c.owner, limite: c.limite || 0,
+      vencimento: c.vencimento || null, cor: c.cor,
+      limite_utilizado: c.limiteUtilizado ?? null, limite_disponivel: c.limiteDisponivel ?? null,
+    };
+    if (exists) await tbl.update(dbRow, { id: c.id });
+    else await tbl.insert({ id: c.id, ...dbRow });
   };
 
-  const deleteCC = (id) => {
+  const deleteCC = async (id) => {
     if (!window.confirm("Excluir este cartão?")) return;
     const next = cartoes.filter(c=>c.id!==id);
-    setCartoes(next); saveCartoes(next);
-    const txNext = txs.filter(t=>t.cartaoId!==id);
-    setTxs(txNext); saveCartaoTxs(txNext);
+    setCartoes(next);
+    const txNext = txsRef.current.filter(t=>t.cartaoId!==id);
+    setTxs(txNext);
+
+    const [ccTbl, txTbl] = await Promise.all([dbFrom("cartoes"), dbFrom("cartao_transactions")]);
+    if (ccTbl) await ccTbl.del({ id });
+    if (txTbl) {
+      const toDelete = txsRef.current.filter(t=>t.cartaoId===id);
+      await Promise.all(toDelete.map(t => txTbl.del({ id: t.id })));
+    }
   };
 
-  const saveTx = (tx) => {
-    const next = txs.find(x=>x.id===tx.id) ? txs.map(x=>x.id===tx.id?tx:x) : [tx,...txs];
-    setTxs(next); saveCartaoTxs(next);
+
+  // Salvar transações importadas em lote no Supabase
+  const persistCartaoTxs = async (newTxs) => {
+    const tbl = await dbFrom("cartao_transactions");
+    if (!tbl) return;
+    for (let i=0; i<newTxs.length; i+=20) {
+      await Promise.all(newTxs.slice(i,i+20).map(t => tbl.insert({
+        id: t.id, cartao_id: t.cartaoId, date: t.date, description: t.description,
+        amount: t.amount, category: t.category || "outros", notes: t.notes || "", spender: t.spender || "",
+      })));
+    }
+  };
+
+  // Persistir limite do cartão no Supabase
+  const persistCartaoLimite = async (cartaoId, fields) => {
+    const tbl = await dbFrom("cartoes");
+    if (!tbl || !cartaoId) return;
+    const dbFields = {};
+    if ("limite" in fields) dbFields.limite = fields.limite;
+    if ("limiteUtilizado" in fields) dbFields.limite_utilizado = fields.limiteUtilizado;
+    if ("limiteDisponivel" in fields) dbFields.limite_disponivel = fields.limiteDisponivel;
+    await tbl.update(dbFields, { id: cartaoId });
+  };
+
+  const saveTx = async (tx) => {
+    const exists = txsRef.current.find(x=>x.id===tx.id);
+    const next = exists ? txsRef.current.map(x=>x.id===tx.id?tx:x) : [tx,...txsRef.current];
+    setTxs(next);
     setShowTx(false); setEditTx(null);
     showToast("✅ Lançamento salvo!");
+
+    const tbl = await dbFrom("cartao_transactions");
+    if (!tbl) return;
+    const dbRow = {
+      cartao_id: tx.cartaoId, date: tx.date, description: tx.description,
+      amount: tx.amount, category: tx.category || "outros",
+      notes: tx.notes || "", spender: tx.spender || "",
+    };
+    if (exists) await tbl.update(dbRow, { id: tx.id });
+    else await tbl.insert({ id: tx.id, ...dbRow });
   };
 
-  const deleteTx = (id) => {
-    const next = txs.filter(t=>t.id!==id);
-    setTxs(next); saveCartaoTxs(next);
+  const deleteTx = async (id) => {
+    const next = txsRef.current.filter(t=>t.id!==id);
+    setTxs(next);
+    const tbl = await dbFrom("cartao_transactions");
+    if (tbl) await tbl.del({ id });
   };
 
   // ── Parsers de CSV por bandeira ──────────────────────────────────────────────
@@ -3384,14 +3509,15 @@ Responda APENAS o array JSON:`
           spender: "",
         })).filter(t => t.description && t.amount !== 0);
 
-        const deduped = newTxs.filter(n => !txs.some(t =>
+        const deduped = newTxs.filter(n => !txsRef.current.some(t =>
           t.cartaoId===n.cartaoId && t.date===n.date &&
           Math.abs(t.amount)===Math.abs(n.amount) &&
           t.description.toLowerCase()===n.description.toLowerCase()
         ));
 
-        const next = [...deduped, ...txs];
-        setTxs(next); saveCartaoTxs(next);
+        const next = [...deduped, ...txsRef.current];
+        setTxs(next);
+        persistCartaoTxs(deduped);
         setUpStatus(`✅ ${deduped.length} transações importadas do CSV!`);
         setUploading(false);
         return;
@@ -3480,15 +3606,16 @@ Responda APENAS o objeto JSON:`
 
       // Update limite if found
       if (parsed.limite_total && cartaoId) {
-        setCartoes(prev => {
-          const next = prev.map(c => c.id===cartaoId ? {
-            ...c,
-            limite: parsed.limite_total,
-            limiteUtilizado: parsed.limite_utilizado ?? null,
-            limiteDisponivel: parsed.limite_disponivel,
-          } : c);
-          saveCartoes(next);
-          return next;
+        setCartoes(prev => prev.map(c => c.id===cartaoId ? {
+          ...c,
+          limite: parsed.limite_total,
+          limiteUtilizado: parsed.limite_utilizado ?? null,
+          limiteDisponivel: parsed.limite_disponivel,
+        } : c));
+        persistCartaoLimite(cartaoId, {
+          limite: parsed.limite_total,
+          limiteUtilizado: parsed.limite_utilizado ?? null,
+          limiteDisponivel: parsed.limite_disponivel ?? null,
         });
       }
 
@@ -3505,14 +3632,15 @@ Responda APENAS o objeto JSON:`
       })).filter(t => t.description && t.amount !== 0);
 
       // Dedup
-      const deduped = newTxs.filter(n => !txs.some(t =>
+      const deduped = newTxs.filter(n => !txsRef.current.some(t =>
         t.cartaoId===n.cartaoId && t.date===n.date &&
         Math.abs(t.amount)===Math.abs(n.amount) &&
         t.description.toLowerCase()===n.description.toLowerCase()
       ));
 
-      const next = [...deduped, ...txs];
-      setTxs(next); saveCartaoTxs(next);
+      const next = [...deduped, ...txsRef.current];
+      setTxs(next);
+      await persistCartaoTxs(deduped);
       setUpStatus(`✅ ${deduped.length} transações importadas!${parsed.limite_total ? ` Limite: ${brl(parsed.limite_total)}` : ""}`);
     } catch(e) {
       setUpStatus("❌ " + e.message);
@@ -3587,11 +3715,13 @@ Responda APENAS o objeto JSON:`
         amount: -Math.abs(parseFloat(parsed.amount)||0),
         category: parsed.category || "outros",
         notes: "",
+        spender: "",
       };
       if (!tx.description || !tx.amount) { setUpStatus("❌ Não encontrou dados no comprovante"); setUploading(false); return; }
 
-      const next = [tx, ...txs];
-      setTxs(next); saveCartaoTxs(next);
+      const next = [tx, ...txsRef.current];
+      setTxs(next);
+      await persistCartaoTxs([tx]);
       setUpStatus(`✅ Lançado: ${tx.description} — ${brl(Math.abs(tx.amount))}`);
     } catch(e) {
       setUpStatus("❌ " + e.message);
