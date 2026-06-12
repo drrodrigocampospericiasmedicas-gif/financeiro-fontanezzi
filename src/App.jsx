@@ -3515,19 +3515,6 @@ Responda APENAS o array JSON:`
           t.description.toLowerCase()===n.description.toLowerCase()
         ));
 
-        if (deduped.length === 0) {
-          alert(
-            "DEBUG CSV:\n\n" +
-            "Cartão: " + (cartao?.nome || "(não encontrado, id="+cartaoId+")") + "\n" +
-            "parsed.transacoes: " + parsed.transacoes.length + "\n" +
-            "newTxs (validas): " + newTxs.length + "\n" +
-            "deduped (não-duplicadas): " + deduped.length + "\n" +
-            "txsRef.current.length (já existentes): " + txsRef.current.length + "\n\n" +
-            "Exemplo 1ª transação do CSV:\n" + JSON.stringify(parsed.transacoes[0] || "nenhuma") + "\n\n" +
-            "Exemplo 1ª tx existente:\n" + JSON.stringify(txsRef.current[0] || "nenhuma")
-          );
-        }
-
         const next = [...deduped, ...txsRef.current];
         setTxs(next);
         persistCartaoTxs(deduped);
