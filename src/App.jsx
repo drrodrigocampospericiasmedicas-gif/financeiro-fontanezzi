@@ -58,6 +58,7 @@ const DEFAULT_CATEGORIES = [
   { id: "alimentacao",   label: "Alimentação",   icon: "🍽️", color: "#e08c4c" },
   { id: "padaria",       label: "Padaria",       icon: "🥖",  color: "#d4a843" },
   { id: "supermercado",  label: "Supermercado",  icon: "🛒",  color: "#f39c12" },
+  { id: "feira",         label: "Feira Livre",   icon: "🥬",  color: "#7cb342" },
   { id: "restaurante",   label: "Restaurante",   icon: "🍴",  color: "#e67e22" },
   { id: "farmacia",      label: "Farmácia",      icon: "💊",  color: "#2ecc71" },
   { id: "transporte",    label: "Transporte",    icon: "🚗",  color: "#4c8ec9" },
@@ -75,6 +76,7 @@ const DEFAULT_CATEGORIES = [
   { id: "celular_daniel",label: "Celular Daniel", icon: "📲", color: "#16a085" },
   { id: "vestuario",     label: "Vestuário",     icon: "👔",  color: "#5cc9e0" },
   { id: "financeiro",    label: "Financeiro",    icon: "💳",  color: "#e05c5c" },
+  { id: "pagamento_cartao", label: "Pagamento de Cartão", icon: "🔁", color: "#95a5a6" },
   { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
   { id: "bela",          label: "Bela",          icon: "💅",  color: "#fd79a8" },
   { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
@@ -401,7 +403,7 @@ async function callClaude(prompt, imageBase64 = null, imageMime = null) {
 
 async function classifyTx(description) {
   const text = await callClaude(
-    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, padaria, supermercado, restaurante, farmacia, transporte, gasolina, aluguel_carro, saude, educacao, lazer, moradia, aluguel, condominio, agua, luz, celular, celular_daniel, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, transferencia, receita, outros\n\nDicas: padaria=padaria/pão/bakery, gasolina=posto/combustível, aluguel_carro=locadora/hertz/localiza, aluguel=aluguel imóvel, condominio=condomínio, agua=saneamento/cedae/sabesp, luz=energia/enel/cemig/light, celular=tim/claro/vivo/oi celular casal, celular_daniel=celular daniel/filho, supermercado=mercado/carrefour, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
+    `Classifique esta transação financeira brasileira em UMA das categorias. Responda APENAS o id, sem mais nada.\n\nTransação: "${description}"\n\nCategorias: alimentacao, padaria, feira, supermercado, restaurante, farmacia, transporte, gasolina, aluguel_carro, saude, educacao, lazer, moradia, aluguel, condominio, agua, luz, celular, celular_daniel, vestuario, financeiro, pagamento_cartao, empregada, bela, trabalho, divida, taxas, transferencia, receita, outros\n\nDicas: pagamento_cartao=pagamento de fatura de cartão de crédito (Nubank/PicPay/Next/Itaú/Mastercard), feira=feira livre/hortifruti/sacolão, padaria=padaria/pão/bakery, gasolina=posto/combustível, aluguel_carro=locadora/hertz/localiza, aluguel=aluguel imóvel, condominio=condomínio, agua=saneamento/cedae/sabesp, luz=energia/enel/cemig/light, celular=tim/claro/vivo/oi celular casal, celular_daniel=celular daniel/filho, supermercado=mercado/carrefour, restaurante=restaurante/pizzaria, farmacia=drogaria/farmácia, empregada=diarista/faxineira, bela=salão/cabelo/manicure, trabalho=salário/honorário\n\nResponda apenas o id:`
   );
   const id = text.trim().toLowerCase();
   return DEFAULT_CATEGORIES.find(c => c.id === id)?.id || "outros";
@@ -951,7 +953,7 @@ function exportCSV(transactions, accounts, period) {
 // ─── RELATORIOS ───────────────────────────────────────────────────────────────
 const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
-const Relatorios = ({ transactions, accounts, cashBal }) => {
+const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
   const [tab, setTab]           = useState("tendencia");
   const [year, setYear]         = useState(String(TODAY.getFullYear()));
   const [selMonths, setSelMonths] = useState([]);   // meses selecionados para acumulado
@@ -989,6 +991,42 @@ const Relatorios = ({ transactions, accounts, cashBal }) => {
   yearTxs.forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
   const catSlices = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
   const catTotal = catSlices.reduce((s,c)=>s+c.value,0)||1;
+
+  // ── BALANÇO GERAL CONSOLIDADO ────────────────────────────────────────────────
+  // Junta: extrato (conta corrente, exceto pagamento_cartao) + dinheiro + cartão de crédito
+  // Evita duplicação: o pagamento da fatura na conta corrente não entra, só os
+  // lançamentos individuais do cartão (que já estão categorizados).
+  const balancoPeriod = selMonths.length > 0 ? selMonths : [year];
+  const inPeriod = (date) => balancoPeriod.some(k => date.startsWith(k));
+
+  const contaTxsB = transactions.filter(t =>
+    inPeriod(t.date) && t.amount < 0 && !t.internalTransfer && t.category !== "pagamento_cartao"
+  );
+  const cashTxsB = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount) < 0);
+  const cartaoTxsB = cartaoTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount) < 0);
+
+  const byCatBalanco = {};
+  const addToBalanco = (cat, val, source) => {
+    if (!byCatBalanco[cat]) byCatBalanco[cat] = { total: 0, conta: 0, dinheiro: 0, cartao: 0 };
+    byCatBalanco[cat].total += val;
+    byCatBalanco[cat][source] += val;
+  };
+  contaTxsB.forEach(t => addToBalanco(t.category || "outros", Math.abs(t.amount), "conta"));
+  cashTxsB.forEach(t => addToBalanco(t.category || "outros", Math.abs(parseFloat(t.amount)), "dinheiro"));
+  cartaoTxsB.forEach(t => addToBalanco(t.category || "outros", Math.abs(parseFloat(t.amount)), "cartao"));
+
+  const balancoSlices = Object.entries(byCatBalanco)
+    .sort((a,b) => b[1].total - a[1].total)
+    .map(([id, val]) => ({ id, label: catOf(id).label, icon: catOf(id).icon, color: catOf(id).color, ...val }));
+  const balancoTotal = balancoSlices.reduce((s,c)=>s+c.total,0) || 1;
+
+  const balancoTotConta    = contaTxsB.reduce((s,t)=>s+Math.abs(t.amount),0);
+  const balancoTotDinheiro = cashTxsB.reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+  const balancoTotCartao   = cartaoTxsB.reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+
+  const balancoPeriodLabel = selMonths.length > 0
+    ? selMonths.sort().map(k => MONTH_NAMES[parseInt(k.split("-")[1])-1]+"/"+k.split("-")[0].slice(2)).join(" + ")
+    : `Ano ${year}`;
 
   // By person
   const byOwner = {};
@@ -1033,6 +1071,7 @@ const Relatorios = ({ transactions, accounts, cashBal }) => {
         <div style={{ display:"flex", gap:2 }}>
           {tabBtn("tendencia","📈 Tendência")}
           {tabBtn("categorias","🍩 Categorias")}
+          {tabBtn("balanco","⚖️ Balanço Geral")}
           {tabBtn("pessoa","👥 Por Pessoa")}
           {tabBtn("mensal","📅 Mensal")}
         </div>
@@ -1205,6 +1244,47 @@ const Relatorios = ({ transactions, accounts, cashBal }) => {
               }))}
               labels={labels} height={200}
             />
+          </Card>
+        </div>
+      )}
+
+      {/* ─── BALANÇO GERAL CONSOLIDADO ─── */}
+      {tab==="balanco" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+          <Card>
+            <SectionTitle>Para onde o dinheiro está indo — {balancoPeriodLabel}</SectionTitle>
+            <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
+              Soma conta corrente + dinheiro em espécie + cartão de crédito, por categoria.
+              Pagamentos de fatura não são contados (evita duplicidade — cada gasto do cartão já está categorizado individualmente).
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:20 }}>
+              <StatCard label="Conta Corrente" value={brl(balancoTotConta)}    icon="🏦" color={C.blue}  sub="débitos em conta" />
+              <StatCard label="Dinheiro"       value={brl(balancoTotDinheiro)} icon="💵" color={C.green} sub="espécie" />
+              <StatCard label="Cartão Crédito" value={brl(balancoTotCartao)}   icon="💳" color={C.gold}  sub="faturas detalhadas" />
+              <StatCard label="Total Geral"    value={brl(balancoTotal)}       icon="⚖️" color={C.goldLight} sub="todos os gastos" />
+            </div>
+            <div style={{ display:"flex", gap:28, alignItems:"flex-start", flexWrap:"wrap" }}>
+              <DonutChart slices={balancoSlices.map(c=>({label:c.label,value:c.total,color:c.color,icon:c.icon,id:c.id}))} size={180} />
+              <div style={{ flex:1, minWidth:280 }}>
+                {balancoSlices.map(c=>(
+                  <div key={c.id} style={{ marginBottom:12 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+                      <div style={{ width:10, height:10, borderRadius:3, background:c.color, flexShrink:0 }} />
+                      <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", flex:1 }}>{c.icon} {c.label}</span>
+                      <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.text }}>{brl(c.total)}</span>
+                      <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", minWidth:36, textAlign:"right" }}>{(c.total/balancoTotal*100).toFixed(0)}%</span>
+                    </div>
+                    {(c.conta>0 || c.dinheiro>0 || c.cartao>0) && (
+                      <div style={{ display:"flex", gap:10, marginLeft:20, fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                        {c.conta>0    && <span>🏦 {brl(c.conta)}</span>}
+                        {c.dinheiro>0 && <span>💵 {brl(c.dinheiro)}</span>}
+                        {c.cartao>0   && <span>💳 {brl(c.cartao)}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </Card>
         </div>
       )}
@@ -3409,7 +3489,8 @@ const Cartoes = () => {
   const mapCategory = (cat) => {
     const c = (cat||"").toLowerCase();
     if (c.includes("restaurante")||c.includes("food")||c.includes("aliment")||c.includes("lanche")) return "restaurante";
-    if (c.includes("supermercado")||c.includes("mercado")||c.includes("hortifruti")) return "supermercado";
+    if (c.includes("feira")||c.includes("hortifruti")||c.includes("verdura")||c.includes("sacolão")||c.includes("sacolao")) return "feira";
+    if (c.includes("supermercado")||c.includes("mercado")) return "supermercado";
     if (c.includes("farmácia")||c.includes("farmacia")||c.includes("drogaria")||c.includes("saúde")||c.includes("saude")) return "farmacia";
     if (c.includes("transporte")||c.includes("uber")||c.includes("99")||c.includes("posto")||c.includes("gasolina")) return "transporte";
     if (c.includes("educação")||c.includes("educacao")||c.includes("escola")||c.includes("curso")) return "educacao";
@@ -3460,7 +3541,7 @@ const Cartoes = () => {
                 messages: [{ role: "user", content:
 `Classifique cada transação com uma categoria. Retorne SOMENTE JSON sem markdown.
 Formato: [{"idx":0,"category":"categoria"},{"idx":1,"category":"categoria"},...]
-Categorias: alimentacao, supermercado, restaurante, padaria, farmacia, saude, transporte, gasolina, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
+Categorias: alimentacao, supermercado, restaurante, padaria, feira, farmacia, saude, transporte, gasolina, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
 
 Transações (formato data|descrição|valor):
 ${txSummary}
@@ -3579,7 +3660,7 @@ Formato:
   "transacoes": [{"date":"YYYY-MM-DD","description":"texto","amount":numero_positivo,"category":"categoria"}]
 }
 
-Categorias disponíveis: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
+Categorias disponíveis: alimentacao, supermercado, restaurante, feira, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, divida, taxas, outros
 
 Regras:
 - Todas as transações = amount POSITIVO (são débitos do cartão)
@@ -3669,7 +3750,7 @@ Responda APENAS o objeto JSON:`
       if (isImage) {
         content = [
           { type:"image", source:{ type:"base64", media_type:file.type, data:b64 } },
-          { type:"text", text:`Comprovante de compra no cartão. Extraia: data (YYYY-MM-DD), estabelecimento/descrição, valor total. Retorne JSON: {"date":"YYYY-MM-DD","description":"texto","amount":valor_positivo,"category":"categoria"}. Categorias: alimentacao, supermercado, restaurante, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, outros. Responda APENAS o JSON.` }
+          { type:"text", text:`Comprovante de compra no cartão. Extraia: data (YYYY-MM-DD), estabelecimento/descrição, valor total. Retorne JSON: {"date":"YYYY-MM-DD","description":"texto","amount":valor_positivo,"category":"categoria"}. Categorias: alimentacao, supermercado, restaurante, feira, farmacia, transporte, saude, educacao, lazer, moradia, vestuario, financeiro, empregada, bela, trabalho, outros. Responda APENAS o JSON.` }
         ];
       } else {
         // PDF comprovante — extract text first
@@ -3985,6 +4066,36 @@ export default function App() {
   // Manter refs sempre atualizados via useEffect
   useEffect(() => { txsRef.current  = transactions; }, [transactions]);
   useEffect(() => { accsRef.current = accounts; },     [accounts]);
+
+  // Transações de cartão de crédito e dinheiro — para o relatório consolidado
+  const [cartaoTxs, setCartaoTxs] = useState([]);
+  const [cashTxsGlobal, setCashTxsGlobal] = useState([]);
+  useEffect(() => {
+    const loadExtra = async () => {
+      const [ccTbl, cashTbl] = await Promise.all([dbFrom("cartao_transactions"), dbFrom("cash_transactions")]);
+      if (ccTbl) {
+        const res = await ccTbl.select("*", "&order=date.desc");
+        if (res?.data) {
+          setCartaoTxs(res.data.map(t => ({
+            id: t.id, cartaoId: t.cartao_id, date: t.date, description: t.description,
+            amount: parseFloat(t.amount), category: t.category || "outros",
+            notes: t.notes || "", spender: t.spender || "",
+          })));
+        }
+      }
+      if (cashTbl) {
+        const res = await cashTbl.select("*", "&order=date.desc");
+        if (res?.data) {
+          setCashTxsGlobal(res.data.map(t => ({
+            id: t.id, date: t.date, description: t.description,
+            amount: parseFloat(t.amount), category: t.category || "outros",
+            notes: t.notes || "", owner: t.owner || "rodrigo",
+          })));
+        }
+      }
+    };
+    loadExtra();
+  }, []);
   const [editTx, setEditTx]     = useState(null);
   const [showForm, setForm]     = useState(false);
   const [toast, setToast]       = useState(null);
@@ -4514,7 +4625,7 @@ export default function App() {
             ) : <>
               {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} cashBal={cashBal} />}
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
-              {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} />}
+              {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
