@@ -1000,6 +1000,13 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
   const catSlices = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
   const catTotal = catSlices.reduce((s,c)=>s+c.value,0)||1;
 
+  // Receitas por categoria — all year
+  const yearRecTxs = transactions.filter(t=>t.date.startsWith(year)&&t.amount>0&&!t.internalTransfer);
+  const byCatRec = {};
+  yearRecTxs.forEach(t=>{ byCatRec[t.category]=(byCatRec[t.category]||0)+t.amount; });
+  const catSlicesRec = Object.entries(byCatRec).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
+  const catTotalRec = catSlicesRec.reduce((s,c)=>s+c.value,0)||1;
+
   // ── BALANÇO GERAL CONSOLIDADO ────────────────────────────────────────────────
   // Junta: extrato (conta corrente, exceto pagamento_cartao) + dinheiro + cartão de crédito
   // Evita duplicação: o pagamento da fatura na conta corrente não entra, só os
@@ -1252,6 +1259,30 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
               }))}
               labels={labels} height={200}
             />
+          </Card>
+          <Card>
+            <SectionTitle>Receitas por categoria — {year}</SectionTitle>
+            {catSlicesRec.length === 0 ? (
+              <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>Sem receitas registradas em {year}.</div>
+            ) : (
+              <div style={{ display:"flex", gap:28, alignItems:"center", flexWrap:"wrap" }}>
+                <DonutChart slices={catSlicesRec} size={180} />
+                <div style={{ flex:1, minWidth:200 }}>
+                  {catSlicesRec.map(c=>(
+                    <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                      <div style={{ width:10, height:10, borderRadius:3, background:c.color, flexShrink:0 }} />
+                      <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", flex:1 }}>{c.icon} {c.label}</span>
+                      <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.green }}>{brl(c.value)}</span>
+                      <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", minWidth:36, textAlign:"right" }}>{(c.value/catTotalRec*100).toFixed(0)}%</span>
+                    </div>
+                  ))}
+                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+                    <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", fontWeight:600 }}>Total</span>
+                    <span style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.green }}>{brl(catTotalRec)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       )}
