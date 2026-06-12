@@ -764,28 +764,30 @@ function exportPDF(transactions, accounts, period, year, cashBal) {
   const byCat = {};
   despesas.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + Math.abs(t.amount); });
   const catList = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-  const catColors = {
-    alimentacao:"#e67e22",padaria:"#e67e22",supermercado:"#e67e22",restaurante:"#e67e22",
-    farmacia:"#2ecc71",saude:"#2ecc71",transporte:"#3498db",gasolina:"#3498db",aluguel_carro:"#3498db",
-    moradia:"#9b59b6",aluguel:"#9b59b6",condominio:"#9b59b6",agua:"#1abc9c",luz:"#f1c40f",
-    educacao:"#8e44ad",lazer:"#e91e63",vestuario:"#ff5722",trabalho:"#607d8b",
-    financeiro:"#795548",divida:"#f44336",empregada:"#00bcd4",bela:"#e91e63",outros:"#95a5a6",
-  };
   const maxCat = catList[0]?.[1] || 1;
 
-  // ── Donut SVG ────────────────────────────────────────────────────────────────
-  const makeDonut = (slices, size=160) => {
+  // ── Receitas por categoria ───────────────────────────────────────────────────
+  const byCatRec = {};
+  receitas.forEach(t => { byCatRec[t.category] = (byCatRec[t.category] || 0) + t.amount; });
+  const catListRec = Object.entries(byCatRec).sort((a, b) => b[1] - a[1]);
+  const maxCatRec = catListRec[0]?.[1] || 1;
+
+  // Cores/ícones/labels reais das categorias do app (inclui Feira, receitas médicas, etc.)
+  const catMeta = (id) => catOf(id);
+
+  // ── Donut SVG (genérico, recebe total para porcentagens) ─────────────────────
+  const makeDonut = (slices, total, size=160) => {
     const r = 55; const cx = size/2; const cy = size/2;
     let cumAngle = -Math.PI / 2;
     const paths = slices.map(([id, val]) => {
-      const angle = (val / totalDes) * 2 * Math.PI;
+      const angle = (val / total) * 2 * Math.PI;
       const x1 = cx + r * Math.cos(cumAngle);
       const y1 = cy + r * Math.sin(cumAngle);
       cumAngle += angle;
       const x2 = cx + r * Math.cos(cumAngle);
       const y2 = cy + r * Math.sin(cumAngle);
       const large = angle > Math.PI ? 1 : 0;
-      const color = catColors[id] || "#95a5a6";
+      const color = catMeta(id).color || "#95a5a6";
       return `<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${color}" opacity="0.85"/>`;
     });
     return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
@@ -902,18 +904,35 @@ function exportPDF(transactions, accounts, period, year, cashBal) {
 <!-- Gastos por categoria -->
 <h2>Despesas por Categoria</h2>
 <div class="cat-section">
-  ${makeDonut(catList)}
+  ${makeDonut(catList, totalDes)}
   <div class="cat-bars">
     ${catList.map(([id, val]) => `
       <div class="cat-row">
         <div class="cat-row-header">
-          <span>${id}</span>
+          <span>${catMeta(id).icon} ${catMeta(id).label}</span>
           <span style="font-weight:600">${brlF(val)} <span style="font-weight:400;color:#888">(${(val/totalDes*100).toFixed(0)}%)</span></span>
         </div>
-        <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxCat*100).toFixed(0)}%;background:${catColors[id]||"#95a5a6"}"></div></div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxCat*100).toFixed(0)}%;background:${catMeta(id).color}"></div></div>
       </div>`).join("")}
   </div>
 </div>
+
+<!-- Receitas por categoria -->
+<h2>Receitas por Categoria</h2>
+${catListRec.length === 0 ? `<div style="font-size:13px;color:#888">Sem receitas registradas no período.</div>` : `
+<div class="cat-section">
+  ${makeDonut(catListRec, totalRec)}
+  <div class="cat-bars">
+    ${catListRec.map(([id, val]) => `
+      <div class="cat-row">
+        <div class="cat-row-header">
+          <span>${catMeta(id).icon} ${catMeta(id).label}</span>
+          <span style="font-weight:600;color:#2e7d32">${brlF(val)} <span style="font-weight:400;color:#888">(${(val/totalRec*100).toFixed(0)}%)</span></span>
+        </div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxCatRec*100).toFixed(0)}%;background:${catMeta(id).color}"></div></div>
+      </div>`).join("")}
+  </div>
+</div>`}
 
 <!-- Extrato -->
 <h2>Extrato — ${periodLabel}</h2>
@@ -966,6 +985,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
   const [tab, setTab]           = useState("tendencia");
   const [year, setYear]         = useState(String(TODAY.getFullYear()));
   const [selMonths, setSelMonths] = useState([]);   // meses selecionados para acumulado
+  const [exportMonth, setExportMonth] = useState(`${TODAY.getFullYear()}-${String(TODAY.getMonth()+1).padStart(2,"0")}`);
   const [showAccum, setShowAccum] = useState(false); // painel de seleção aberto
 
   const toggleMonth = (key) => setSelMonths(s => s.includes(key) ? s.filter(k=>k!==key) : [...s, key]);
@@ -1111,6 +1131,14 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
               fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
             }}>📄 Exportar seleção</button>
           )}
+          <select style={{ ...IS, width:"auto", fontSize:12 }} value={exportMonth} onChange={e=>setExportMonth(e.target.value)}>
+            {months.map(m=> <option key={m.key} value={m.key}>{m.label}/{year}</option>)}
+          </select>
+          <button onClick={()=>exportPDF(transactions,accounts,exportMonth,null,cashBal)} style={{
+            background:"transparent", border:`1px solid ${C.gold}`, color:C.goldLight, borderRadius:8,
+            padding:"8px 14px", fontSize:12, fontWeight:600,
+            fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+          }}>📄 Exportar mês</button>
           <button onClick={()=>exportCSV(transactions,accounts,null)} style={{
             background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
             padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
