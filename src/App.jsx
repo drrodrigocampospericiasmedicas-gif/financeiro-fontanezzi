@@ -726,7 +726,7 @@ const BarChart = ({ data, height=160 }) => {
 };
 
 // ─── EXPORT CSV ───────────────────────────────────────────────────────────────
-function exportPDF(transactions, accounts, period, year, cashBal) {
+function exportPDF(transactions, accounts, period, year, cashBal, cartaoTxs=[], cashTxs=[]) {
   const acc  = (id) => accounts.find(a => a.id === id) || { name: id, owner: "" };
   const brlF = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
   const MONTH_NAMES_PT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -755,6 +755,17 @@ function exportPDF(transactions, accounts, period, year, cashBal) {
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
+  // Função auxiliar para checar se uma data está no período (mesma lógica do filtro de txs)
+  const inPeriod = (date) => {
+    if (Array.isArray(period) && period.length > 0) return period.some(k => date.startsWith(k));
+    if (period && !Array.isArray(period)) return date.startsWith(period);
+    const y = year || String(new Date().getFullYear());
+    return date.startsWith(y);
+  };
+
+  const cartaoTxsB = cartaoTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount) < 0);
+  const cashTxsB   = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount) < 0);
+
   const despesas = txs.filter(t => t.amount < 0);
   const receitas = txs.filter(t => t.amount > 0);
   const totalDes = despesas.reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -774,6 +785,23 @@ function exportPDF(transactions, accounts, period, year, cashBal) {
 
   // Cores/ícones/labels reais das categorias do app (inclui Feira, receitas médicas, etc.)
   const catMeta = (id) => catOf(id);
+
+  // ── Balanço Geral Consolidado: conta corrente + dinheiro + cartão de crédito ──
+  // Exclui pagamento_cartao da conta corrente para não duplicar com os lançamentos
+  // individuais do cartão (que já estão categorizados).
+  const contaTxsBalanco = despesas.filter(t => t.category !== "pagamento_cartao");
+  const byCatBalanco = {};
+  const addBalanco = (cat, val) => { byCatBalanco[cat] = (byCatBalanco[cat] || 0) + val; };
+  contaTxsBalanco.forEach(t => addBalanco(t.category || "outros", Math.abs(t.amount)));
+  cashTxsB.forEach(t => addBalanco(t.category || "outros", Math.abs(parseFloat(t.amount))));
+  cartaoTxsB.forEach(t => addBalanco(t.category || "outros", Math.abs(parseFloat(t.amount))));
+  const balancoList = Object.entries(byCatBalanco).sort((a,b)=>b[1]-a[1]);
+  const balancoTotal = balancoList.reduce((s,[,v])=>s+v,0) || 1;
+  const maxBalanco = balancoList[0]?.[1] || 1;
+
+  const balancoTotConta    = contaTxsBalanco.reduce((s,t)=>s+Math.abs(t.amount),0);
+  const balancoTotDinheiro = cashTxsB.reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+  const balancoTotCartao   = cartaoTxsB.reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
 
   // ── Donut SVG (genérico, recebe total para porcentagens) ─────────────────────
   const makeDonut = (slices, total, size=160) => {
@@ -930,6 +958,45 @@ ${catListRec.length === 0 ? `<div style="font-size:13px;color:#888">Sem receitas
           <span style="font-weight:600;color:#2e7d32">${brlF(val)} <span style="font-weight:400;color:#888">(${(val/totalRec*100).toFixed(0)}%)</span></span>
         </div>
         <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxCatRec*100).toFixed(0)}%;background:${catMeta(id).color}"></div></div>
+      </div>`).join("")}
+  </div>
+</div>`}
+
+<!-- Balanço Geral Consolidado -->
+<h2>Balanço Geral — Conta + Dinheiro + Cartão</h2>
+<div style="font-size:12px;color:#888;margin-bottom:14px">
+  Soma conta corrente, dinheiro em espécie e lançamentos do cartão de crédito, por categoria.
+  Pagamentos de fatura não são contados aqui (evita duplicidade — cada gasto do cartão já está categorizado individualmente).
+</div>
+<div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+  <div class="kpi">
+    <div class="label">🏦 Conta Corrente</div>
+    <div class="val" style="color:#3498db">${brlF(balancoTotConta)}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">💵 Dinheiro</div>
+    <div class="val" style="color:#2e7d32">${brlF(balancoTotDinheiro)}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">💳 Cartão de Crédito</div>
+    <div class="val" style="color:#b8960c">${brlF(balancoTotCartao)}</div>
+  </div>
+  <div class="kpi">
+    <div class="label">⚖️ Total Geral</div>
+    <div class="val" style="color:#1a1a2e">${brlF(balancoTotal)}</div>
+  </div>
+</div>
+${balancoList.length === 0 ? `<div style="font-size:13px;color:#888;margin-bottom:28px">Sem dados no período.</div>` : `
+<div class="cat-section">
+  ${makeDonut(balancoList, balancoTotal)}
+  <div class="cat-bars">
+    ${balancoList.map(([id, val]) => `
+      <div class="cat-row">
+        <div class="cat-row-header">
+          <span>${catMeta(id).icon} ${catMeta(id).label}</span>
+          <span style="font-weight:600">${brlF(val)} <span style="font-weight:400;color:#888">(${(val/balancoTotal*100).toFixed(0)}%)</span></span>
+        </div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${(val/maxBalanco*100).toFixed(0)}%;background:${catMeta(id).color}"></div></div>
       </div>`).join("")}
   </div>
 </div>`}
@@ -1125,7 +1192,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
             Σ {selMonths.length>0 ? `${selMonths.length} meses` : "Somar meses"}
           </button>
           {selMonths.length>0 && (
-            <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal)} style={{
+            <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal,cartaoTxs,cashTxs)} style={{
               background:"#4caf82", border:"none", color:"#fff", borderRadius:8,
               padding:"8px 14px", fontSize:12, fontWeight:600,
               fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
@@ -1134,7 +1201,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
           <select style={{ ...IS, width:"auto", fontSize:12 }} value={exportMonth} onChange={e=>setExportMonth(e.target.value)}>
             {months.map(m=> <option key={m.key} value={m.key}>{m.label}/{year}</option>)}
           </select>
-          <button onClick={()=>exportPDF(transactions,accounts,exportMonth,null,cashBal)} style={{
+          <button onClick={()=>exportPDF(transactions,accounts,exportMonth,null,cashBal,cartaoTxs,cashTxs)} style={{
             background:"transparent", border:`1px solid ${C.gold}`, color:C.goldLight, borderRadius:8,
             padding:"8px 14px", fontSize:12, fontWeight:600,
             fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
@@ -1143,7 +1210,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
             background:"transparent", border:`1px solid ${C.border}`, color:C.soft, borderRadius:8,
             padding:"8px 14px", fontSize:12, fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
           }}>⬇ CSV</button>
-          <button onClick={()=>exportPDF(transactions,accounts,null,year,cashBal)} style={{
+          <button onClick={()=>exportPDF(transactions,accounts,null,year,cashBal,cartaoTxs,cashTxs)} style={{
             background:C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
             padding:"8px 16px", fontSize:12, fontWeight:600,
             fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
@@ -1202,7 +1269,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
                   <span style={{ fontSize:12, color:C.green, fontFamily:"'DM Sans',sans-serif" }}>📈 Receitas: <strong>{brl(rec)}</strong></span>
                   <span style={{ fontSize:12, color:C.red,   fontFamily:"'DM Sans',sans-serif" }}>📉 Despesas: <strong>{brl(des)}</strong></span>
                   <span style={{ fontSize:12, color:rec-des>=0?C.goldLight:C.red, fontFamily:"'DM Sans',sans-serif" }}>💰 Saldo: <strong>{brl(rec-des)}</strong></span>
-                  <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal)} style={{
+                  <button onClick={()=>exportPDF(transactions,accounts,selMonths,null,cashBal,cartaoTxs,cashTxs)} style={{
                     marginLeft:"auto", background:"#4caf82", border:"none", color:"#fff", borderRadius:8,
                     padding:"8px 18px", fontSize:12, fontWeight:600,
                     fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
