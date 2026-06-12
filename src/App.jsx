@@ -78,7 +78,7 @@ const DEFAULT_CATEGORIES = [
   { id: "financeiro",    label: "Financeiro",    icon: "💳",  color: "#e05c5c" },
   { id: "pagamento_cartao", label: "Pagamento de Cartão", icon: "🔁", color: "#95a5a6" },
   { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
-  { id: "bela",          label: "Bela",          icon: "💅",  color: "#fd79a8" },
+  { id: "bela",          label: "Bela",          icon: "🐶",  color: "#fd79a8" },
   { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
   { id: "divida",        label: "Dívida",        icon: "📋",  color: "#e17055" },
   { id: "taxas",         label: "Taxas Bancárias",icon: "🏛️", color: "#636e72" },
