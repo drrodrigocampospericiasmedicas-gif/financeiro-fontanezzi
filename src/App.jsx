@@ -3442,15 +3442,6 @@ const Cartoes = () => {
         });
 
         const parsed = parseCSVFatura(text, cartao);
-        if (parsed.transacoes.length === 0) {
-          // Mostrar diagnóstico direto na tela (sem precisar do console)
-          alert(
-            "DEBUG CSV:\n\n" +
-            "Cartão: " + (cartao?.nome || "(não encontrado, id="+cartaoId+")") + "\n\n" +
-            "Primeiras linhas do arquivo:\n" + text.split(/\r?\n/).slice(0,4).join("\n") + "\n\n" +
-            "Tamanho do texto: " + text.length + " chars"
-          );
-        }
 
         // Se CSV simples (sem IA), classificar com IA apenas se tiver categorias "outros"
         const needsAI = parsed.transacoes.some(t => t.category === "outros");
@@ -3523,6 +3514,19 @@ Responda APENAS o array JSON:`
           Math.abs(t.amount)===Math.abs(n.amount) &&
           t.description.toLowerCase()===n.description.toLowerCase()
         ));
+
+        if (deduped.length === 0) {
+          alert(
+            "DEBUG CSV:\n\n" +
+            "Cartão: " + (cartao?.nome || "(não encontrado, id="+cartaoId+")") + "\n" +
+            "parsed.transacoes: " + parsed.transacoes.length + "\n" +
+            "newTxs (validas): " + newTxs.length + "\n" +
+            "deduped (não-duplicadas): " + deduped.length + "\n" +
+            "txsRef.current.length (já existentes): " + txsRef.current.length + "\n\n" +
+            "Exemplo 1ª transação do CSV:\n" + JSON.stringify(parsed.transacoes[0] || "nenhuma") + "\n\n" +
+            "Exemplo 1ª tx existente:\n" + JSON.stringify(txsRef.current[0] || "nenhuma")
+          );
+        }
 
         const next = [...deduped, ...txsRef.current];
         setTxs(next);
