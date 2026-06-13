@@ -2674,10 +2674,11 @@ const Carteira = ({ accounts, onCashChange }) => {
 
     const next = [tx, ...cashTxs];
     setCashTxs(next);
-    const tbl = await dbFrom("cash_transactions");
-    if (tbl) await tbl.insert(tx);
     setShowAdjust(false);
     if (onCashChange) onCashChange();
+
+    // Persistir em background
+    dbFrom("cash_transactions").then(tbl => tbl?.insert(tx)).catch(err => console.error("[adjust]", err));
   };
 
   const handleSave = async () => {
@@ -2685,23 +2686,26 @@ const Carteira = ({ accounts, onCashChange }) => {
     const amt = parseFloat(form.amount.replace(",", "."));
     if (isNaN(amt)) return;
     const tx = { ...form, id: editCash?.id || ("cash_" + Date.now()), amount: form.type === "entrada" ? Math.abs(amt) : -Math.abs(amt) };
-    const next = editCash ? cashTxs.map(t => t.id === tx.id ? tx : t) : [tx, ...cashTxs];
+    const isEdit = !!editCash;
+
+    // 1. Fechar modal e atualizar UI imediatamente
+    const next = isEdit ? cashTxs.map(t => t.id === tx.id ? tx : t) : [tx, ...cashTxs];
     setCashTxs(next);
-    // Save to Supabase
-    const tbl = await dbFrom("cash_transactions");
-    if (tbl) {
-      if (editCash) await tbl.update(tx, { id: tx.id });
-      else await tbl.insert(tx);
-    }
     setShowForm(false); setEditCash(null);
     if (onCashChange) onCashChange();
+
+    // 2. Persistir no Supabase em background
+    dbFrom("cash_transactions").then(async tbl => {
+      if (!tbl) return;
+      if (isEdit) await tbl.update(tx, { id: tx.id });
+      else await tbl.insert(tx);
+    }).catch(err => console.error("[cashSave]", err));
   };
 
   const handleDelete = async (id) => {
     setCashTxs(prev => prev.filter(t => t.id !== id));
     if (onCashChange) onCashChange();
-    const tbl = await dbFrom("cash_transactions");
-    if (tbl) await tbl.del({ id });
+    dbFrom("cash_transactions").then(tbl => tbl?.del({ id }));
   };
 
   // group accounts by owner for display
