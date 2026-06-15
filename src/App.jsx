@@ -448,6 +448,14 @@ const Chip = ({ icon, label, color }) => (
 
 const Divider = () => <div style={{ height:1, background:C.border }} />;
 
+const Card = ({children, style={}}) => (
+  <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24, ...style }}>{children}</div>
+);
+const SectionTitle = ({children}) => (
+  <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:16 }}>{children}</div>
+);
+const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
 const StatCard = ({ label, value, sub, color, icon }) => (
   <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 24px", display:"flex", flexDirection:"column", gap:6, position:"relative", overflow:"hidden" }}>
     <div style={{ position:"absolute", top:16, right:20, fontSize:22, opacity:.15 }}>{icon}</div>
@@ -1045,8 +1053,380 @@ function exportCSV(transactions, accounts, period) {
   URL.revokeObjectURL(url);
 }
 
+
+// ─── ANÁLISE IA & INVESTIMENTOS ─────────────────────────────────────────────────
+const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
+  const [tab, setTab] = useState("gastos"); // gastos | investimentos
+  const [loading, setLoading] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [error, setError] = useState("");
+  const [period, setPeriod] = useState(() => {
+    const y = TODAY.getFullYear();
+    const m = String(TODAY.getMonth()+1).padStart(2,"0");
+    return `${y}-${m}`;
+  });
+
+  // Investimentos
+  const [investAmount, setInvestAmount] = useState("");
+  const [investRisk, setInvestRisk] = useState("moderado");
+  const [investAnalysis, setInvestAnalysis] = useState(null);
+  const [investLoading, setInvestLoading] = useState(false);
+  const [investError, setInvestError] = useState("");
+
+  const accountsTotal = accounts.reduce((s,a)=>s+(parseFloat(a.balance)||0),0);
+  const grandTotal = accountsTotal + (parseFloat(cashBal)||0);
+
+  // ── Montar resumo financeiro do período para a IA ────────────────────────────
+  const buildFinancialSummary = (periodKey) => {
+    const inPeriod = (date) => date.startsWith(periodKey);
+
+    const contaTxs  = transactions.filter(t => inPeriod(t.date) && t.amount<0 && !t.internalTransfer && t.category!=="pagamento_cartao");
+    const recTxs    = transactions.filter(t => inPeriod(t.date) && t.amount>0 && !t.internalTransfer);
+    const cashDes   = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
+    const cashRec   = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)>0);
+    const cardTxs   = cartaoTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
+
+    const byCat = {};
+    const add = (cat, val) => { byCat[cat] = (byCat[cat]||0) + val; };
+    contaTxs.forEach(t => add(t.category||"outros", Math.abs(t.amount)));
+    cashDes.forEach(t => add(t.category||"outros", Math.abs(parseFloat(t.amount))));
+    cardTxs.forEach(t => add(t.category||"outros", Math.abs(parseFloat(t.amount))));
+
+    const totalDespesas = Object.values(byCat).reduce((s,v)=>s+v,0);
+    const totalReceitas = recTxs.reduce((s,t)=>s+t.amount,0) + cashRec.reduce((s,t)=>s+parseFloat(t.amount),0);
+
+    const catBreakdown = Object.entries(byCat)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([id,val]) => `${catOf(id).label}: R$ ${val.toFixed(2)} (${(val/totalDespesas*100).toFixed(1)}%)`)
+      .join("\\n");
+
+    // Top 10 maiores transações individuais do período
+    const allTxs = [
+      ...contaTxs.map(t=>({...t, origem:"Conta corrente"})),
+      ...cashDes.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
+      ...cardTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
+    ].sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)).slice(0,10);
+
+    const topTxs = allTxs.map(t => `${t.date} | ${t.description} | R$ ${Math.abs(t.amount).toFixed(2)} | ${catOf(t.category).label} | ${t.origem}`).join("\\n");
+
+    return {
+      totalDespesas, totalReceitas,
+      saldo: totalReceitas - totalDespesas,
+      catBreakdown, topTxs,
+      numTxs: contaTxs.length + cashDes.length + cardTxs.length,
+    };
+  };
+
+  // ── Análise de Gastos via IA ──────────────────────────────────────────────────
+  const runAnalysis = async () => {
+    setLoading(true); setError(""); setAnalysis(null);
+    try {
+      const summary = buildFinancialSummary(period);
+      const [y,m] = period.split("-");
+      const periodLabel = MONTH_NAMES[parseInt(m)-1] + "/" + y;
+
+      if (summary.numTxs === 0) {
+        setError(`Não há lançamentos registrados em ${periodLabel}. Escolha outro mês.`);
+        setLoading(false);
+        return;
+      }
+
+      const prompt = `Você é um consultor financeiro pessoal experiente, direto e realista. Analise os dados financeiros de uma família brasileira (médico ortopedista e esposa) referentes a ${periodLabel}.
+
+DADOS DO PERÍODO:
+- Receitas totais: R$ ${summary.totalReceitas.toFixed(2)}
+- Despesas totais: R$ ${summary.totalDespesas.toFixed(2)}
+- Saldo do período: R$ ${summary.saldo.toFixed(2)}
+- Patrimônio total em contas + dinheiro: R$ ${grandTotal.toFixed(2)}
+
+GASTOS POR CATEGORIA:
+${summary.catBreakdown}
+
+10 MAIORES LANÇAMENTOS DO PERÍODO:
+${summary.topTxs}
+
+Sua tarefa, em português do Brasil:
+1. Identifique para onde o dinheiro está indo — quais categorias dominam o orçamento e se isso é saudável proporcionalmente à receita.
+2. Aponte de 3 a 5 oportunidades REALISTAS de redução de gastos, baseadas especificamente nos dados acima (não genéricas). Para cada uma, estime um valor aproximado de economia mensal.
+3. Avalie a taxa de poupança (saldo/receita) e diga se está em um nível saudável (referência: 20%+ é bom, abaixo de 10% é preocupante).
+4. Seja direto, sem rodeios, mas em tom construtivo — sem julgar o estilo de vida, focando em ajustes possíveis dentro da realidade da família.
+
+Retorne SOMENTE um objeto JSON, sem markdown, no formato:
+{
+  "resumo": "1-2 frases sobre o panorama geral",
+  "para_onde_vai": "análise de 2-3 frases sobre os principais destinos do dinheiro",
+  "taxa_poupanca_pct": numero,
+  "avaliacao_poupanca": "1 frase avaliando a taxa de poupança",
+  "oportunidades": [
+    {"categoria": "nome da categoria", "sugestao": "sugestão específica e realista", "economia_estimada": numero_mensal}
+  ]
+}`;
+
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-opus-4-8",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) throw new Error("Falha na requisição à IA");
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      const match = text.match(/\\{[\\s\\S]*\\}/);
+      if (!match) throw new Error("Resposta da IA em formato inesperado");
+      const parsed = JSON.parse(match[0]);
+      setAnalysis(parsed);
+    } catch (e) {
+      console.error(e);
+      setError("Não foi possível gerar a análise agora. Tente novamente em alguns instantes.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Sugestão de Carteira de Dividendos via IA ────────────────────────────────
+  const runInvestAnalysis = async () => {
+    const amt = parseFloat(investAmount.replace(",","."));
+    if (isNaN(amt) || amt <= 0) { setInvestError("Informe um valor válido para investir."); return; }
+
+    setInvestLoading(true); setInvestError(""); setInvestAnalysis(null);
+    try {
+      const riskLabel = { conservador:"conservador (prioriza segurança, baixa volatilidade)", moderado:"moderado (equilíbrio entre renda e crescimento)", arrojado:"arrojado (aceita mais volatilidade por maior potencial de renda)" }[investRisk];
+
+      const prompt = `Você é um consultor de investimentos especializado em renda passiva e dividendos no mercado brasileiro. Um médico ortopedista quer investir R$ ${amt.toFixed(2)} com foco em geração de dividendos/renda passiva mensal.
+
+Perfil de risco declarado: ${riskLabel}.
+Patrimônio total atual em contas: R$ ${grandTotal.toFixed(2)} (apenas para contexto, não para alocação).
+
+Monte uma carteira de dividendos diversificada com ativos do mercado brasileiro (FIIs — Fundos Imobiliários, ações pagadoras de dividendos como bancos, elétricas, seguradoras, telecom, e opcionalmente Tesouro Selic/IPCA para reserva), distribuindo os R$ ${amt.toFixed(2)} entre 5 a 8 ativos.
+
+Para cada ativo, informe: ticker, nome/setor, percentual alocado, valor em R$, e o motivo da escolha (foco em dividend yield, estabilidade, diversificação setorial).
+
+Seja realista quanto a yields esperados (DY médio histórico, sem garantir rentabilidade futura) e inclua um aviso de que não é recomendação de investimento formal, apenas uma sugestão educacional.
+
+Retorne SOMENTE um objeto JSON, sem markdown, no formato:
+{
+  "estrategia": "2-3 frases explicando a lógica geral da carteira montada",
+  "yield_estimado_pct": numero (DY médio anual estimado da carteira),
+  "renda_mensal_estimada": numero (estimativa de renda passiva mensal em R$),
+  "ativos": [
+    {"ticker": "XXXX11", "nome": "Nome/Setor", "tipo": "FII|Ação|Tesouro", "percentual": numero, "valor": numero, "motivo": "justificativa breve"}
+  ],
+  "aviso": "texto do aviso legal/educacional"
+}`;
+
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-opus-4-8",
+          max_tokens: 2500,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) throw new Error("Falha na requisição à IA");
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      const match = text.match(/\\{[\\s\\S]*\\}/);
+      if (!match) throw new Error("Resposta da IA em formato inesperado");
+      const parsed = JSON.parse(match[0]);
+      setInvestAnalysis(parsed);
+    } catch (e) {
+      console.error(e);
+      setInvestError("Não foi possível gerar a sugestão agora. Tente novamente em alguns instantes.");
+    } finally {
+      setInvestLoading(false);
+    }
+  };
+
+  const tabBtn = (id, label) => (
+    <button onClick={()=>setTab(id)} style={{
+      padding:"9px 18px", borderRadius:10, fontSize:13, fontWeight:tab===id?600:400,
+      fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
+      background: tab===id ? C.gold+"22" : "transparent",
+      border: `1px solid ${tab===id ? C.gold : C.border}`,
+      color: tab===id ? C.goldLight : C.muted
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+      <div style={{ display:"flex", gap:8 }}>
+        {tabBtn("gastos","🔍 Análise de Gastos")}
+        {tabBtn("investimentos","💹 Carteira de Dividendos")}
+      </div>
+
+      {/* ─── ANÁLISE DE GASTOS ─── */}
+      {tab==="gastos" && (
+        <Card>
+          <SectionTitle>Para onde está indo o dinheiro — análise por IA</SectionTitle>
+          <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
+            A IA analisa conta corrente, dinheiro e cartão de crédito do mês escolhido, identifica padrões de gasto e sugere oportunidades realistas de economia.
+          </div>
+          <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:20 }}>
+            <select style={{ ...IS, width:"auto", fontSize:12 }} value={period} onChange={e=>{setPeriod(e.target.value); setAnalysis(null); setError("");}}>
+              {Array.from({length:12},(_,i)=>{
+                const d = new Date(TODAY.getFullYear(), TODAY.getMonth()-i, 1);
+                const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+                return <option key={key} value={key}>{MONTH_NAMES[d.getMonth()]}/{d.getFullYear()}</option>;
+              })}
+            </select>
+            <button onClick={runAnalysis} disabled={loading} style={{
+              background: C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
+              padding:"9px 18px", fontSize:12, fontWeight:600,
+              fontFamily:"'DM Sans',sans-serif", cursor: loading?"default":"pointer", opacity: loading?0.6:1
+            }}>{loading ? "🤖 Analisando..." : "🤖 Gerar análise"}</button>
+          </div>
+
+          {error && (
+            <div style={{ fontSize:12, color:C.red, fontFamily:"'DM Sans',sans-serif", background:C.surface, borderRadius:8, padding:"10px 14px", marginBottom:16 }}>
+              {error}
+            </div>
+          )}
+
+          {loading && (
+            <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", textAlign:"center", padding:"30px 0" }}>
+              Analisando seus dados financeiros...
+            </div>
+          )}
+
+          {analysis && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ background:C.surface, borderRadius:12, padding:16 }}>
+                <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Panorama Geral</div>
+                <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{analysis.resumo}</div>
+              </div>
+
+              <div style={{ background:C.surface, borderRadius:12, padding:16 }}>
+                <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Para onde o dinheiro está indo</div>
+                <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{analysis.para_onde_vai}</div>
+              </div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
+                <StatCard label="Taxa de Poupança" value={`${analysis.taxa_poupanca_pct?.toFixed(1)}%`} icon="📈" color={analysis.taxa_poupanca_pct>=20?C.green:analysis.taxa_poupanca_pct>=10?C.gold:C.red} sub={analysis.avaliacao_poupanca} />
+              </div>
+
+              <div>
+                <SectionTitle>Oportunidades de Economia</SectionTitle>
+                <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:10 }}>
+                  {(analysis.oportunidades||[]).map((op,i)=>(
+                    <div key={i} style={{ background:C.surface, borderRadius:12, padding:14, display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16 }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:13, fontWeight:600, color:C.text, fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>{op.categoria}</div>
+                        <div style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", lineHeight:1.5 }}>{op.sugestao}</div>
+                      </div>
+                      {op.economia_estimada > 0 && (
+                        <div style={{ textAlign:"right", flexShrink:0 }}>
+                          <div style={{ fontSize:9, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif" }}>Economia/mês</div>
+                          <div style={{ fontSize:16, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.green }}>{brl(op.economia_estimada)}</div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {analysis.oportunidades?.length > 0 && (
+                  <div style={{ marginTop:12, fontSize:12, color:C.goldLight, fontFamily:"'DM Sans',sans-serif", fontWeight:600 }}>
+                    💰 Potencial de economia total: {brl(analysis.oportunidades.reduce((s,o)=>s+(o.economia_estimada||0),0))}/mês
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ─── CARTEIRA DE DIVIDENDOS ─── */}
+      {tab==="investimentos" && (
+        <Card>
+          <SectionTitle>Sugestão de Carteira de Dividendos — análise por IA</SectionTitle>
+          <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
+            Informe quanto deseja investir e seu perfil de risco. A IA sugere uma carteira diversificada com foco em renda passiva (FIIs, ações pagadoras de dividendos, Tesouro Direto).
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
+            <div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VALOR A INVESTIR (R$)</div>
+              <input style={IS} placeholder="Ex: 10000,00" value={investAmount} onChange={e=>setInvestAmount(e.target.value)} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>PERFIL DE RISCO</div>
+              <select style={IS} value={investRisk} onChange={e=>setInvestRisk(e.target.value)}>
+                <option value="conservador">🛡️ Conservador</option>
+                <option value="moderado">⚖️ Moderado</option>
+                <option value="arrojado">🚀 Arrojado</option>
+              </select>
+            </div>
+          </div>
+          <button onClick={runInvestAnalysis} disabled={investLoading} style={{
+            background: C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
+            padding:"10px 20px", fontSize:12, fontWeight:600,
+            fontFamily:"'DM Sans',sans-serif", cursor: investLoading?"default":"pointer", opacity: investLoading?0.6:1,
+            marginBottom:20
+          }}>{investLoading ? "🤖 Montando carteira..." : "🤖 Sugerir carteira"}</button>
+
+          {investError && (
+            <div style={{ fontSize:12, color:C.red, fontFamily:"'DM Sans',sans-serif", background:C.surface, borderRadius:8, padding:"10px 14px", marginBottom:16 }}>
+              {investError}
+            </div>
+          )}
+
+          {investLoading && (
+            <div style={{ fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif", textAlign:"center", padding:"30px 0" }}>
+              Montando sugestão de carteira...
+            </div>
+          )}
+
+          {investAnalysis && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ background:C.surface, borderRadius:12, padding:16 }}>
+                <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Estratégia</div>
+                <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{investAnalysis.estrategia}</div>
+              </div>
+
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
+                <StatCard label="DY Estimado (anual)" value={`${investAnalysis.yield_estimado_pct?.toFixed(1)}%`} icon="📊" color={C.gold} sub="dividend yield médio" />
+                <StatCard label="Renda Mensal Estimada" value={brl(investAnalysis.renda_mensal_estimada)} icon="💵" color={C.green} sub="passiva, aproximada" />
+                <StatCard label="Total Investido" value={brl(parseFloat(investAmount.replace(",",".")))} icon="💰" color={C.goldLight} sub={investRisk} />
+              </div>
+
+              <div>
+                <SectionTitle>Ativos Sugeridos</SectionTitle>
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:10 }}>
+                  {(investAnalysis.ativos||[]).map((a,i)=>(
+                    <div key={i} style={{ background:C.surface, borderRadius:12, padding:14, display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16 }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                          <span style={{ fontSize:13, fontWeight:700, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{a.ticker}</span>
+                          <span style={{ fontSize:10, background:C.gold+"22", color:C.goldLight, borderRadius:4, padding:"1px 6px", fontFamily:"'DM Sans',sans-serif" }}>{a.tipo}</span>
+                        </div>
+                        <div style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif", marginBottom:4 }}>{a.nome}</div>
+                        <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", lineHeight:1.5 }}>{a.motivo}</div>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0 }}>
+                        <div style={{ fontSize:16, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.text }}>{brl(a.valor)}</div>
+                        <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{a.percentual?.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6, background:C.surface, borderRadius:12, padding:14, fontStyle:"italic" }}>
+                ⚠️ {investAnalysis.aviso}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+};
+
+
 // ─── RELATORIOS ───────────────────────────────────────────────────────────────
-const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
 const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
   const [tab, setTab]           = useState("tendencia");
@@ -1157,13 +1537,6 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
       color: tab===id ? C.goldLight : C.muted,
       borderBottom: tab===id ? `2px solid ${C.gold}` : "2px solid transparent",
     }}>{label}</button>
-  );
-
-  const Card = ({children, style={}}) => (
-    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:24, ...style }}>{children}</div>
-  );
-  const SectionTitle = ({children}) => (
-    <div style={{ fontSize:11, color:C.muted, letterSpacing:1, textTransform:"uppercase", fontFamily:"'DM Sans',sans-serif", marginBottom:16 }}>{children}</div>
   );
 
   return (
@@ -4726,12 +5099,14 @@ export default function App() {
     { id:"importar",    label:"Importar",     icon:"↑"  },
     { id:"comprovantes",label:"Comprovantes", icon:"📷" },
     { id:"contas",      label:"Contas",       icon:"⬡"  },
+    { id:"analise",     label:"Análise IA",   icon:"🤖" },
   ];
 
   const pageTitle = {
     dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios",
     carteira:"Carteira", cartoes:"Cartões de Crédito", dividas:"Dívidas & Financiamentos",
-    metas:"Metas", importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas"
+    metas:"Metas", importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas",
+    analise:"Análise IA & Investimentos"
   };
 
   const bottomNav = [
@@ -4872,6 +5247,7 @@ export default function App() {
               {nav==="dashboard"    && <Dashboard    transactions={transactions} accounts={accounts} onNavigate={setNav} cashBal={cashBal} />}
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
+              {nav==="analise"      && <AnaliseIA    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
