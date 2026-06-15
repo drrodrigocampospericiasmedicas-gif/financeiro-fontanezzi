@@ -1179,13 +1179,16 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-opus-4-8",
+          model: "claude-haiku-4-5-20251001",
           max_tokens: 2000,
           messages: [{ role: "user", content: prompt }]
         })
       });
 
-      if (!res.ok) throw new Error("Falha na requisição à IA");
+      if (!res.ok) {
+        const errText = await res.text().catch(()=>"");
+        throw new Error(`HTTP ${res.status} ${errText.slice(0,150)}`);
+      }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
       const match = text.match(/\\{[\\s\\S]*\\}/);
@@ -1194,7 +1197,7 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
       setAnalysis(parsed);
     } catch (e) {
       console.error(e);
-      setError("Não foi possível gerar a análise agora. Tente novamente em alguns instantes.");
+      setError(`Não foi possível gerar a análise agora: ${e.message || e}. Tente novamente.`);
     } finally {
       setLoading(false);
     }
@@ -1235,13 +1238,16 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-opus-4-8",
+          model: "claude-haiku-4-5-20251001",
           max_tokens: 2500,
           messages: [{ role: "user", content: prompt }]
         })
       });
 
-      if (!res.ok) throw new Error("Falha na requisição à IA");
+      if (!res.ok) {
+        const errText = await res.text().catch(()=>"");
+        throw new Error(`HTTP ${res.status} ${errText.slice(0,150)}`);
+      }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
       const match = text.match(/\\{[\\s\\S]*\\}/);
@@ -1250,7 +1256,7 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
       setInvestAnalysis(parsed);
     } catch (e) {
       console.error(e);
-      setInvestError("Não foi possível gerar a sugestão agora. Tente novamente em alguns instantes.");
+      setInvestError(`Não foi possível gerar a sugestão agora: ${e.message || e}. Tente novamente.`);
     } finally {
       setInvestLoading(false);
     }
