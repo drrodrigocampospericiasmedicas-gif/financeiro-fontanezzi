@@ -1191,7 +1191,7 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
       }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
-      const match = text.match(/\\{[\\s\\S]*\\}/);
+      const match = text.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("Resposta da IA em formato inesperado");
       const parsed = JSON.parse(match[0]);
       setAnalysis(parsed);
@@ -1250,7 +1250,7 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
       }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
-      const match = text.match(/\\{[\\s\\S]*\\}/);
+      const match = text.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("Resposta da IA em formato inesperado");
       const parsed = JSON.parse(match[0]);
       setInvestAnalysis(parsed);
