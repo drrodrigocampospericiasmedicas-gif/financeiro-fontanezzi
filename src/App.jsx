@@ -1638,7 +1638,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
       {showAccum && (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:20 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <div style={{ fontSize:13, color:C.text, fontFamily:"'Cormorant Garamond',serif", fontSize:17 }}>
+            <div style={{ fontSize:17, color:C.text, fontFamily:"'Cormorant Garamond',serif" }}>
               Selecionar meses para somar
             </div>
             <div style={{ display:"flex", gap:8 }}>
