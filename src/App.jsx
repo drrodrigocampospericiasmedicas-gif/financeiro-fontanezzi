@@ -2203,9 +2203,14 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
           const des = allAccTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
           const anterior = (acc.balance||0) - (rec - des);
           return (
-            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
-              🕓 Saldo anterior ({acc.name}): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
-            </div>
+            <>
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                🕓 Saldo anterior ({acc.name}): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
+              </div>
+              <div style={{ background:C.goldLight+"15", border:`1px solid ${C.goldLight}30`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.goldLight, fontFamily:"'DM Sans',sans-serif" }}>
+                💰 Saldo atual ({acc.name}): <strong>{brl(acc.balance||0)}</strong>
+              </div>
+            </>
           );
         })() : (() => {
           const allTxsNoT = transactions.filter(t=>!t.internalTransfer);
@@ -2214,9 +2219,14 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
           const total = accounts.reduce((s,a)=>s+(a.balance||0),0);
           const anterior = total - (rec - des);
           return (
-            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
-              🕓 Saldo anterior (todas as contas): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
-            </div>
+            <>
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+                🕓 Saldo anterior (todas as contas): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
+              </div>
+              <div style={{ background:C.goldLight+"15", border:`1px solid ${C.goldLight}30`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.goldLight, fontFamily:"'DM Sans',sans-serif" }}>
+                💰 Saldo atual (todas as contas): <strong>{brl(total)}</strong>
+              </div>
+            </>
           );
         })()}
       </div>
@@ -3657,25 +3667,85 @@ const Dividas = ({ transactions=[], cashTxs=[], cartaoTxs=[] }) => {
     ...cartaoTxs.filter(t => t.category==="divida" && parseFloat(t.amount)<0).map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão", origemIcon:"💳"})),
   ].sort((a,b) => b.date.localeCompare(a.date));
 
-  const total = allDividaTxs.reduce((s,t)=>s+Math.abs(t.amount),0);
+  // ── Seleção de mês(es) ────────────────────────────────────────────────────────
+  const [selMonths, setSelMonths] = useState(() => {
+    const y = TODAY.getFullYear();
+    const m = String(TODAY.getMonth()+1).padStart(2,"0");
+    return [`${y}-${m}`];
+  });
+  const [periodYear, setPeriodYear] = useState(TODAY.getFullYear());
+  const toggleMonth = (key) => setSelMonths(s => s.includes(key) ? s.filter(k=>k!==key) : [...s,key]);
+
+  const filtered = selMonths.length === 0
+    ? allDividaTxs
+    : allDividaTxs.filter(t => selMonths.some(k => t.date.startsWith(k)));
+
+  const total = filtered.reduce((s,t)=>s+Math.abs(t.amount),0);
+
+  const periodLabel = selMonths.length === 0
+    ? "todos os períodos"
+    : [...selMonths].sort().map(k => {
+        const [y,m] = k.split("-");
+        return MONTH_NAMES[parseInt(m)-1] + "/" + y;
+      }).join(" + ");
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+      {/* Seletor de mês(es) */}
+      <Card>
+        <SectionTitle>Selecionar período</SectionTitle>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={()=>setPeriodYear(y=>y-1)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>‹</button>
+            <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.text }}>{periodYear}</span>
+            <button onClick={()=>setPeriodYear(y=>y+1)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>›</button>
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <button onClick={()=>setSelMonths([])} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Todos</button>
+            <button onClick={()=>{
+              const y = TODAY.getFullYear(); const m = String(TODAY.getMonth()+1).padStart(2,"0");
+              setSelMonths([`${y}-${m}`]); setPeriodYear(y);
+            }} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Mês atual</button>
+          </div>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:6 }}>
+          {Array.from({length:12},(_,i)=>{
+            const key = `${periodYear}-${String(i+1).padStart(2,"0")}`;
+            const sel = selMonths.includes(key);
+            const hasData = allDividaTxs.some(t=>t.date.startsWith(key));
+            return (
+              <button key={key} onClick={()=>{ if(hasData) toggleMonth(key); }} style={{
+                padding:"8px 4px", borderRadius:8, fontSize:11, fontWeight:sel?700:400,
+                fontFamily:"'DM Sans',sans-serif", cursor:hasData?"pointer":"default",
+                background: sel ? C.gold+"22" : "transparent",
+                border:`1px solid ${sel ? C.gold : C.border}`,
+                color: sel ? C.goldLight : hasData ? C.soft : C.border,
+                opacity: hasData ? 1 : 0.35
+              }}>{MONTH_NAMES[i]}</button>
+            );
+          })}
+        </div>
+      </Card>
+
       {/* Total */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
-        <StatCard label="Total em dívidas pagas" value={brl(total)} icon="📉" color={C.red} sub={`${allDividaTxs.length} lançamento${allDividaTxs.length!==1?"s":""}`} />
+        <StatCard label="Total em dívidas pagas" value={brl(total)} icon="📉" color={C.red} sub={`${filtered.length} lançamento${filtered.length!==1?"s":""} · ${periodLabel}`} />
       </div>
 
       {/* Lista */}
-      {allDividaTxs.length === 0 ? (
+      {filtered.length === 0 ? (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"40px 24px", textAlign:"center", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
-          Nenhum lançamento classificado como <strong style={{color:C.soft}}>Dívida</strong> ainda.<br/>
-          Lançamentos com essa categoria — em conta corrente, dinheiro ou cartão — aparecem aqui automaticamente.
+          {allDividaTxs.length === 0 ? (
+            <>Nenhum lançamento classificado como <strong style={{color:C.soft}}>Dívida</strong> ainda.<br/>
+            Lançamentos com essa categoria — em conta corrente, dinheiro ou cartão — aparecem aqui automaticamente.</>
+          ) : (
+            <>Nenhuma dívida em {periodLabel}.</>
+          )}
         </div>
       ) : (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
-          {allDividaTxs.map((t,i) => (
-            <div key={t.id||i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px", borderBottom: i<allDividaTxs.length-1 ? `1px solid ${C.border}` : "none" }}>
+          {filtered.map((t,i) => (
+            <div key={t.id||i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px", borderBottom: i<filtered.length-1 ? `1px solid ${C.border}` : "none" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <span style={{ fontSize:20 }}>{t.origemIcon}</span>
                 <div>
