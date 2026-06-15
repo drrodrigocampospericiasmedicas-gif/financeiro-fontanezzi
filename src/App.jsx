@@ -3647,216 +3647,51 @@ const Login = ({ onLogin }) => {
   );
 };
 
-// ─── DÍVIDAS ──────────────────────────────────────────────────────────────────
-const DIVIDAS_KEY = "fontanezzi_dividas";
-function loadDividas() { try { return JSON.parse(localStorage.getItem(DIVIDAS_KEY)) || []; } catch { return []; } }
-function saveDividas(d) { localStorage.setItem(DIVIDAS_KEY, JSON.stringify(d)); }
+// ─── DÍVIDAS (automático a partir de lançamentos categoria "divida") ──────────
+const Dividas = ({ transactions=[], cashTxs=[], cartaoTxs=[] }) => {
+  // Junta lançamentos das 3 origens classificados como "divida" (apenas despesas)
+  const allDividaTxs = [
+    ...transactions.filter(t => t.category==="divida" && t.amount<0 && !t.internalTransfer).map(t=>({...t, origem:"Conta corrente", origemIcon:"🏦"})),
+    ...cashTxs.filter(t => t.category==="divida" && parseFloat(t.amount)<0).map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro", origemIcon:"💵"})),
+    ...cartaoTxs.filter(t => t.category==="divida" && parseFloat(t.amount)<0).map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão", origemIcon:"💳"})),
+  ].sort((a,b) => b.date.localeCompare(a.date));
 
-const DIVIDA_TIPOS = [
-  { id:"financiamento", label:"Financiamento",  icon:"🏠" },
-  { id:"veiculo",       label:"Veículo",         icon:"🚗" },
-  { id:"cartao",        label:"Cartão Crédito",  icon:"💳" },
-  { id:"emprestimo",    label:"Empréstimo",      icon:"🏦" },
-  { id:"parcelamento",  label:"Parcelamento",    icon:"🛍️" },
-  { id:"consignado",    label:"Consignado",      icon:"📋" },
-  { id:"outro",         label:"Outro",           icon:"📦" },
-];
-
-const Dividas = () => {
-  const [dividas, setDividas]   = useState(() => loadDividas());
-  const [showForm, setShowForm] = useState(false);
-  const [editItem, setEditItem] = useState(null);
-  const blank = { nome:"", tipo:"financiamento", valorTotal:"", valorParcela:"", parcelasPagas:"", totalParcelas:"", vencimentoDia:"", jurosAnual:"", credor:"", obs:"" };
-  const [form, setForm] = useState(blank);
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
-
-  const openNew  = () => { setForm(blank); setEditItem(null); setShowForm(true); };
-  const openEdit = (d) => { setEditItem(d); setForm({...d}); setShowForm(true); };
-
-  const handleSave = () => {
-    if (!form.nome.trim()) return;
-    const item = { ...form, id: editItem?.id || ("div_"+Date.now()),
-      valorTotal:   parseFloat(String(form.valorTotal).replace(",","."))||0,
-      valorParcela: parseFloat(String(form.valorParcela).replace(",","."))||0,
-      parcelasPagas:  parseInt(form.parcelasPagas)||0,
-      totalParcelas:  parseInt(form.totalParcelas)||0,
-      jurosAnual:   parseFloat(String(form.jurosAnual).replace(",","."))||0,
-    };
-    const next = editItem ? dividas.map(d=>d.id===item.id?item:d) : [...dividas, item];
-    setDividas(next); saveDividas(next);
-    setShowForm(false); setEditItem(null);
-  };
-
-  const handleDelete = (id) => {
-    if (!window.confirm("Excluir esta dívida?")) return;
-    const next = dividas.filter(d=>d.id!==id);
-    setDividas(next); saveDividas(next);
-  };
-
-  // Totals
-  const totalDevido    = dividas.reduce((s,d) => s + (d.valorParcela*(d.totalParcelas-d.parcelasPagas)||0), 0);
-  const totalMensal    = dividas.reduce((s,d) => s + (d.valorParcela||0), 0);
-  const totalOriginal  = dividas.reduce((s,d) => s + (d.valorTotal||0), 0);
-
-  const tipoOf = (id) => DIVIDA_TIPOS.find(t=>t.id===id) || DIVIDA_TIPOS.at(-1);
+  const total = allDividaTxs.reduce((s,t)=>s+Math.abs(t.amount),0);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
-      {/* KPIs */}
+      {/* Total */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
-        <StatCard label="Total em dívidas"   value={brl(totalDevido)}   icon="📉" color={C.red}      sub="saldo restante" />
-        <StatCard label="Parcelas/mês"        value={brl(totalMensal)}   icon="📅" color={C.gold}     sub={`${dividas.length} dívida${dividas.length!==1?"s":""} ativas`} />
-        <StatCard label="Valor original total" value={brl(totalOriginal)} icon="🏦" color={C.muted}   sub="soma dos contratos" />
+        <StatCard label="Total em dívidas pagas" value={brl(total)} icon="📉" color={C.red} sub={`${allDividaTxs.length} lançamento${allDividaTxs.length!==1?"s":""}`} />
       </div>
 
       {/* Lista */}
-      <div style={{ display:"flex", justifyContent:"flex-end" }}>
-        <button onClick={openNew} style={{ background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
-          + Nova dívida
-        </button>
-      </div>
-
-      {dividas.length === 0 && (
+      {allDividaTxs.length === 0 ? (
         <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"40px 24px", textAlign:"center", color:C.muted, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
-          Nenhuma dívida cadastrada. Toque em <strong style={{color:C.soft}}>+ Nova dívida</strong> para começar.
+          Nenhum lançamento classificado como <strong style={{color:C.soft}}>Dívida</strong> ainda.<br/>
+          Lançamentos com essa categoria — em conta corrente, dinheiro ou cartão — aparecem aqui automaticamente.
         </div>
-      )}
-
-      {dividas.map(d => {
-        const tipo = tipoOf(d.tipo);
-        const restante = d.totalParcelas > 0 ? d.totalParcelas - d.parcelasPagas : 0;
-        const saldoRestante = (d.valorParcela||0) * restante;
-        const pct = d.totalParcelas > 0 ? Math.round(d.parcelasPagas/d.totalParcelas*100) : 0;
-        const mesesRestantes = restante;
-        const anosMeses = mesesRestantes >= 12
-          ? `${Math.floor(mesesRestantes/12)}a ${mesesRestantes%12}m`
-          : `${mesesRestantes}m`;
-
-        return (
-          <div key={d.id} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
-            {/* Header */}
-            <div style={{ padding:"18px 20px 14px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-              <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
-                <span style={{ fontSize:24 }}>{tipo.icon}</span>
+      ) : (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, overflow:"hidden" }}>
+          {allDividaTxs.map((t,i) => (
+            <div key={t.id||i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px", borderBottom: i<allDividaTxs.length-1 ? `1px solid ${C.border}` : "none" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <span style={{ fontSize:20 }}>{t.origemIcon}</span>
                 <div>
-                  <div style={{ fontSize:16, color:C.text, fontFamily:"'DM Sans',sans-serif", fontWeight:500 }}>{d.nome}</div>
-                  <div style={{ display:"flex", gap:8, marginTop:4, flexWrap:"wrap" }}>
-                    <span style={{ fontSize:11, background:C.border, color:C.muted, borderRadius:4, padding:"2px 8px", fontFamily:"'DM Sans',sans-serif" }}>{tipo.label}</span>
-                    {d.credor && <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{d.credor}</span>}
-                    {d.jurosAnual>0 && <span style={{ fontSize:11, color:C.gold, fontFamily:"'DM Sans',sans-serif" }}>{d.jurosAnual}% a.a.</span>}
+                  <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{t.description}</div>
+                  <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:2 }}>
+                    {fdate(t.date)} · {t.origem}
                   </div>
                 </div>
               </div>
-              <div style={{ display:"flex", gap:6 }}>
-                <button onClick={()=>openEdit(d)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer" }}>✏️</button>
-                <button onClick={()=>handleDelete(d.id)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer" }}>🗑️</button>
+              <div style={{ fontSize:16, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:C.red }}>
+                {brl(Math.abs(t.amount))}
               </div>
             </div>
-
-            {/* Body */}
-            <div style={{ padding:"16px 20px" }}>
-              {/* Valores */}
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:14, marginBottom:16 }}>
-                {[
-                  ["Parcela mensal", brl(d.valorParcela||0), C.text],
-                  ["Saldo restante", brl(saldoRestante), C.red],
-                  ["Vencimento", d.vencimentoDia ? `Dia ${d.vencimentoDia}` : "—", C.gold],
-                  ["Tempo restante", d.totalParcelas>0 ? anosMeses : "—", C.blue],
-                ].map(([label,val,col])=>(
-                  <div key={label}>
-                    <div style={{ fontSize:10, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:3, textTransform:"uppercase", letterSpacing:1 }}>{label}</div>
-                    <div style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:600, color:col }}>{val}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Progresso */}
-              {d.totalParcelas > 0 && (
-                <div>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-                    <span style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
-                      {d.parcelasPagas} de {d.totalParcelas} parcelas pagas
-                    </span>
-                    <span style={{ fontSize:12, color: pct>=100?C.green:C.soft, fontFamily:"'DM Sans',sans-serif", fontWeight:500 }}>{pct}%</span>
-                  </div>
-                  <div style={{ height:8, background:C.border, borderRadius:8 }}>
-                    <div style={{ height:"100%", width:`${pct}%`, background: pct>=100?C.green:pct>=50?C.gold:C.blue, borderRadius:8, transition:"width .5s" }} />
-                  </div>
-                  {d.obs && <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:8 }}>📝 {d.obs}</div>}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Form modal */}
-      {showForm && (
-        <div style={{ position:"fixed", inset:0, background:"#000b", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:150, overflowY:"auto", padding:"20px 16px" }}>
-          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:20, padding:28, width:"100%", maxWidth:480, marginTop:"auto", marginBottom:"auto" }}>
-            <div style={{ fontSize:22, fontFamily:"'Cormorant Garamond',serif", color:C.text, marginBottom:22 }}>
-              {editItem ? "Editar dívida" : "Nova dívida"}
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-              <div>
-                <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>NOME</div>
-                <input style={IS} placeholder="Ex: Financiamento casa, Carro, etc." value={form.nome} onChange={e=>sf("nome",e.target.value)} />
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>TIPO</div>
-                  <select style={IS} value={form.tipo} onChange={e=>sf("tipo",e.target.value)}>
-                    {DIVIDA_TIPOS.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>CREDOR</div>
-                  <input style={IS} placeholder="Ex: Itaú, Bradesco..." value={form.credor} onChange={e=>sf("credor",e.target.value)} />
-                </div>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VALOR ORIGINAL (R$)</div>
-                  <input style={IS} placeholder="0,00" value={form.valorTotal} onChange={e=>sf("valorTotal",e.target.value)} />
-                </div>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>PARCELA (R$)</div>
-                  <input style={IS} placeholder="0,00" value={form.valorParcela} onChange={e=>sf("valorParcela",e.target.value)} />
-                </div>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>PARCELAS PAGAS</div>
-                  <input style={IS} placeholder="0" type="number" value={form.parcelasPagas} onChange={e=>sf("parcelasPagas",e.target.value)} />
-                </div>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>TOTAL PARCELAS</div>
-                  <input style={IS} placeholder="0" type="number" value={form.totalParcelas} onChange={e=>sf("totalParcelas",e.target.value)} />
-                </div>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>VENC. DIA</div>
-                  <input style={IS} placeholder="10" type="number" min="1" max="31" value={form.vencimentoDia} onChange={e=>sf("vencimentoDia",e.target.value)} />
-                </div>
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>JUROS (% a.a.)</div>
-                  <input style={IS} placeholder="0,00" value={form.jurosAnual} onChange={e=>sf("jurosAnual",e.target.value)} />
-                </div>
-                <div>
-                  <div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>OBSERVAÇÕES</div>
-                  <input style={IS} placeholder="Notas..." value={form.obs} onChange={e=>sf("obs",e.target.value)} />
-                </div>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:10, marginTop:22 }}>
-              <button onClick={handleSave} style={{ flex:1, background:C.gold, color:C.bg, border:"none", borderRadius:8, padding:"13px", fontSize:13, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
-                Salvar
-              </button>
-              <button onClick={()=>{setShowForm(false);setEditItem(null);}} style={{ background:"transparent", color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, padding:"13px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
-                Cancelar
-              </button>
-            </div>
+          ))}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px", background:C.surface }}>
+            <span style={{ fontSize:13, color:C.soft, fontFamily:"'DM Sans',sans-serif", fontWeight:600 }}>Total</span>
+            <span style={{ fontSize:18, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.red }}>{brl(total)}</span>
           </div>
         </div>
       )}
@@ -5364,7 +5199,7 @@ export default function App() {
               {nav==="analise"      && <AnaliseIA    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} transactions={transactions} />}
               {nav==="cartoes"      && <Cartoes />}
-              {nav==="dividas"      && <Dividas />}
+              {nav==="dividas"      && <Dividas transactions={transactions} cashTxs={cashTxsGlobal} cartaoTxs={cartaoTxs} />}
               {nav==="metas"        && <Metas        transactions={transactions} />}
               {nav==="importar"     && <ImportarExtrato accounts={accounts} onImport={importTxs} getTxs={() => txsRef.current} />}
               {nav==="comprovantes" && <Comprovantes accounts={accounts} onAddTx={saveTx} />}
