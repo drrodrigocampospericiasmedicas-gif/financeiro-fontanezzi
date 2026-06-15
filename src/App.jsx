@@ -1060,11 +1060,13 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState("");
-  const [period, setPeriod] = useState(() => {
+  const [selPeriods, setSelPeriods] = useState(() => {
     const y = TODAY.getFullYear();
     const m = String(TODAY.getMonth()+1).padStart(2,"0");
-    return `${y}-${m}`;
+    return [`${y}-${m}`];
   });
+  const [periodYear, setPeriodYear] = useState(TODAY.getFullYear());
+  const togglePeriod = (key) => setSelPeriods(s => s.includes(key) ? s.filter(k=>k!==key) : [...s,key]);
 
   // Investimentos
   const [investAmount, setInvestAmount] = useState("");
@@ -1077,8 +1079,9 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
   const grandTotal = accountsTotal + (parseFloat(cashBal)||0);
 
   // ── Montar resumo financeiro do período para a IA ────────────────────────────
-  const buildFinancialSummary = (periodKey) => {
-    const inPeriod = (date) => date.startsWith(periodKey);
+  const buildFinancialSummary = (periodKeys) => {
+    const keys = Array.isArray(periodKeys) ? periodKeys : [periodKeys];
+    const inPeriod = (date) => keys.some(k => date.startsWith(k));
 
     const contaTxs  = transactions.filter(t => inPeriod(t.date) && t.amount<0 && !t.internalTransfer && t.category!=="pagamento_cartao");
     const recTxs    = transactions.filter(t => inPeriod(t.date) && t.amount>0 && !t.internalTransfer);
@@ -1121,17 +1124,27 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
   const runAnalysis = async () => {
     setLoading(true); setError(""); setAnalysis(null);
     try {
-      const summary = buildFinancialSummary(period);
-      const [y,m] = period.split("-");
-      const periodLabel = MONTH_NAMES[parseInt(m)-1] + "/" + y;
-
-      if (summary.numTxs === 0) {
-        setError(`Não há lançamentos registrados em ${periodLabel}. Escolha outro mês.`);
+      if (selPeriods.length === 0) {
+        setError("Selecione ao menos um mês para analisar.");
         setLoading(false);
         return;
       }
 
-      const prompt = `Você é um consultor financeiro pessoal experiente, direto e realista. Analise os dados financeiros de uma família brasileira (médico ortopedista e esposa) referentes a ${periodLabel}.
+      const summary = buildFinancialSummary(selPeriods);
+      const sorted = [...selPeriods].sort();
+      const periodLabel = sorted.map(k => {
+        const [y,m] = k.split("-");
+        return MONTH_NAMES[parseInt(m)-1] + "/" + y;
+      }).join(" + ");
+      const periodLabelDesc = sorted.length > 1 ? `o período somado (${periodLabel})` : periodLabel;
+
+      if (summary.numTxs === 0) {
+        setError(`Não há lançamentos registrados em ${periodLabel}. Escolha outro período.`);
+        setLoading(false);
+        return;
+      }
+
+      const prompt = `Você é um consultor financeiro pessoal experiente, direto e realista. Analise os dados financeiros de uma família brasileira (médico ortopedista e esposa) referentes a ${periodLabelDesc}.
 
 DADOS DO PERÍODO:
 - Receitas totais: R$ ${summary.totalReceitas.toFixed(2)}
@@ -1265,21 +1278,45 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
         <Card>
           <SectionTitle>Para onde está indo o dinheiro — análise por IA</SectionTitle>
           <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
-            A IA analisa conta corrente, dinheiro e cartão de crédito do mês escolhido, identifica padrões de gasto e sugere oportunidades realistas de economia.
+            A IA analisa conta corrente, dinheiro e cartão de crédito do(s) mês(es) escolhido(s), identifica padrões de gasto e sugere oportunidades realistas de economia. Selecione um ou mais meses para somar.
           </div>
+
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <button onClick={()=>setPeriodYear(y=>y-1)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>‹</button>
+              <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.text }}>{periodYear}</span>
+              <button onClick={()=>setPeriodYear(y=>y+1)} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>›</button>
+            </div>
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={()=>setSelPeriods([])} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>Limpar</button>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:6, marginBottom:16 }}>
+            {Array.from({length:12},(_,i)=>{
+              const key = `${periodYear}-${String(i+1).padStart(2,"0")}`;
+              const sel = selPeriods.includes(key);
+              const hasData = transactions.some(t=>t.date.startsWith(key)) || cashTxs.some(t=>t.date.startsWith(key)) || cartaoTxs.some(t=>t.date.startsWith(key));
+              return (
+                <button key={key} onClick={()=>{ if(hasData){ togglePeriod(key); setAnalysis(null); setError(""); } }} style={{
+                  padding:"8px 4px", borderRadius:8, fontSize:11, fontWeight:sel?700:400,
+                  fontFamily:"'DM Sans',sans-serif", cursor:hasData?"pointer":"default",
+                  background: sel ? C.gold+"22" : "transparent",
+                  border:`1px solid ${sel ? C.gold : C.border}`,
+                  color: sel ? C.goldLight : hasData ? C.soft : C.border,
+                  opacity: hasData ? 1 : 0.35
+                }}>{MONTH_NAMES[i]}</button>
+              );
+            })}
+          </div>
+
           <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:20 }}>
-            <select style={{ ...IS, width:"auto", fontSize:12 }} value={period} onChange={e=>{setPeriod(e.target.value); setAnalysis(null); setError("");}}>
-              {Array.from({length:12},(_,i)=>{
-                const d = new Date(TODAY.getFullYear(), TODAY.getMonth()-i, 1);
-                const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-                return <option key={key} value={key}>{MONTH_NAMES[d.getMonth()]}/{d.getFullYear()}</option>;
-              })}
-            </select>
-            <button onClick={runAnalysis} disabled={loading} style={{
+            <button onClick={runAnalysis} disabled={loading || selPeriods.length===0} style={{
               background: C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
               padding:"9px 18px", fontSize:12, fontWeight:600,
-              fontFamily:"'DM Sans',sans-serif", cursor: loading?"default":"pointer", opacity: loading?0.6:1
-            }}>{loading ? "🤖 Analisando..." : "🤖 Gerar análise"}</button>
+              fontFamily:"'DM Sans',sans-serif", cursor: (loading||selPeriods.length===0)?"default":"pointer", opacity: (loading||selPeriods.length===0)?0.6:1
+            }}>{loading ? "🤖 Analisando..." : `🤖 Gerar análise${selPeriods.length>1 ? ` (${selPeriods.length} meses)` : ""}`}</button>
+
           </div>
 
           {error && (
