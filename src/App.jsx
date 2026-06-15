@@ -1692,12 +1692,25 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
       )}
 
       {/* KPIs do ano */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
-        <StatCard label={`Receitas ${year}`}  value={brl(totRec)}          icon="📈" color={C.green}     sub={`${availMonths.length} meses com dados`} />
-        <StatCard label={`Despesas ${year}`}  value={brl(totDes)}          icon="📉" color={C.red}       sub="excl. transferências" />
-        <StatCard label="Saldo acumulado"     value={brl(totRec-totDes)}   icon="💰" color={totRec-totDes>=0?C.goldLight:C.red} sub={year} />
-        <StatCard label="Economia média/mês"  value={brl(avgSal)}          icon="🎯" color={avgSal>=0?C.green:C.red} sub="receitas − despesas" />
-      </div>
+      {(() => {
+        const allTxsNoT = transactions.filter(t=>!t.internalTransfer);
+        const recAll = allTxsNoT.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+        const desAll = allTxsNoT.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+        const cashRecAll = cashTxs.filter(t=>parseFloat(t.amount)>0).reduce((s,t)=>s+parseFloat(t.amount),0);
+        const cashDesAll = cashTxs.filter(t=>parseFloat(t.amount)<0).reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+        const accountsTotalRel = accounts.reduce((s,a)=>s+(parseFloat(a.balance)||0),0);
+        const grandTotalRel = accountsTotalRel + (parseFloat(cashBal)||0);
+        const saldoAnteriorRel = grandTotalRel - ((recAll+cashRecAll) - (desAll+cashDesAll));
+        return (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 }}>
+            <StatCard label={`Receitas ${year}`}  value={brl(totRec)}          icon="📈" color={C.green}     sub={`${availMonths.length} meses com dados`} />
+            <StatCard label={`Despesas ${year}`}  value={brl(totDes)}          icon="📉" color={C.red}       sub="excl. transferências" />
+            <StatCard label="Saldo acumulado"     value={brl(totRec-totDes)}   icon="💰" color={totRec-totDes>=0?C.goldLight:C.red} sub={year} />
+            <StatCard label="Economia média/mês"  value={brl(avgSal)}          icon="🎯" color={avgSal>=0?C.green:C.red} sub="receitas − despesas" />
+            <StatCard label="Saldo anterior"      value={brl(saldoAnteriorRel)} icon="🕓" color={C.muted}    sub="antes dos lançamentos no app" />
+          </div>
+        );
+      })()}
 
       {/* ─── TENDÊNCIA ─── */}
       {tab==="tendencia" && (
@@ -2175,7 +2188,7 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
         <div style={{ background:C.border, borderRadius:10, padding:"10px 20px", fontSize:13, color: (totRec+totDes)>=0?C.green:C.red, fontFamily:"'DM Sans',sans-serif" }}>
           Saldo: <strong>{brl(totRec+totDes)}</strong>
         </div>
-        {filter.account && (() => {
+        {filter.account ? (() => {
           const acc = accounts.find(a=>a.id===filter.account);
           if (!acc) return null;
           const allAccTxs = transactions.filter(t=>t.accountId===filter.account && !t.internalTransfer);
@@ -2185,6 +2198,17 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
           return (
             <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
               🕓 Saldo anterior ({acc.name}): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
+            </div>
+          );
+        })() : (() => {
+          const allTxsNoT = transactions.filter(t=>!t.internalTransfer);
+          const rec = allTxsNoT.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+          const des = allTxsNoT.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+          const total = accounts.reduce((s,a)=>s+(a.balance||0),0);
+          const anterior = total - (rec - des);
+          return (
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+              🕓 Saldo anterior (todas as contas): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
             </div>
           );
         })()}
@@ -3209,15 +3233,15 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
         <div style={{ fontSize: 11, color: "#94a3b8", letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 8 }}>Patrimônio disponível total</div>
         <div style={{ fontSize: 44, fontFamily: "'Cormorant Garamond',serif", fontWeight: 700, color: grandTotal >= 0 ? "#f0c060" : "#ef4444", lineHeight: 1, marginBottom: 6 }}>{brl(grandTotal)}</div>
         <div style={{ fontSize: 12, color: "#64748b", fontFamily: "'DM Sans',sans-serif", marginBottom: 20 }}>Contas bancárias + dinheiro em espécie</div>
-        <div style={{ display: "flex", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 12 }}>
           {[
             ["🏦 Contas", brl(accountsTotal), "#60a5fa"],
             ["💵 Dinheiro", brl(cashBalance), cashBalance >= 0 ? "#34d399" : "#f87171"],
             ["🕓 Saldo anterior", brl(saldoAnteriorTotal), "#94a3b8"],
           ].map(([label, val, col]) => (
-            <div key={label} style={{ background: "rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 16px", flex: 1 }}>
-              <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 18, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col }}>{val}</div>
+            <div key={label} style={{ background: "rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 14px", minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'DM Sans',sans-serif", marginBottom: 4, whiteSpace: "nowrap" }}>{label}</div>
+              <div style={{ fontSize: 16, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: col, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{val}</div>
             </div>
           ))}
         </div>
