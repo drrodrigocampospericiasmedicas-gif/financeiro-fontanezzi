@@ -2958,7 +2958,14 @@ const Carteira = ({ accounts, onCashChange }) => {
               {/* Tipo */}
               <div style={{ display: "flex", gap: 8 }}>
                 {[["saida","💸 Saída",C.red],["entrada","💵 Entrada",C.green]].map(([t,l,col])=>(
-                  <button key={t} onClick={()=>sf("type",t)} style={{
+                  <button key={t} onClick={()=>{
+                    sf("type",t);
+                    // Resetar categoria para o grupo correto ao trocar entrada/saída
+                    const receitaCats = ["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas"];
+                    const isCurrentReceita = receitaCats.includes(form.category);
+                    if (t === "entrada" && !isCurrentReceita) sf("category","receita");
+                    if (t === "saida" && isCurrentReceita) sf("category","outros");
+                  }} style={{
                     flex:1, padding:"10px", borderRadius:8, fontSize:13, fontWeight:500,
                     fontFamily:"'DM Sans',sans-serif", cursor:"pointer",
                     background: form.type===t ? col+"22" : "transparent",
@@ -2998,7 +3005,10 @@ const Carteira = ({ accounts, onCashChange }) => {
               <div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>CATEGORIA</div>
                 <select style={IS} value={form.category} onChange={e=>sf("category",e.target.value)}>
-                  {DEFAULT_CATEGORIES.filter(c=>!["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id)).map(c=>(
+                  {(form.type === "entrada"
+                    ? DEFAULT_CATEGORIES.filter(c=>["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas"].includes(c.id))
+                    : DEFAULT_CATEGORIES.filter(c=>!["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id))
+                  ).map(c=>(
                     <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
                   ))}
                 </select>
