@@ -1713,6 +1713,7 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
             <StatCard label={`Despesas ${year}`}  value={brl(totDes)}          icon="📉" color={C.red}       sub="excl. transferências" />
             <StatCard label="Saldo acumulado"     value={brl(totRec-totDes)}   icon="💰" color={totRec-totDes>=0?C.goldLight:C.red} sub={year} />
             <StatCard label="Economia média/mês"  value={brl(avgSal)}          icon="🎯" color={avgSal>=0?C.green:C.red} sub="receitas − despesas" />
+            <StatCard label="Patrimônio total"   value={brl(grandTotalRel)}    icon="🏦" color={C.goldLight} sub="contas + dinheiro" />
             <StatCard label="Saldo anterior"      value={brl(saldoAnteriorRel)} icon="🕓" color={C.muted}    sub="antes dos lançamentos no app" />
           </div>
         );
