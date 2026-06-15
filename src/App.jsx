@@ -1961,6 +1961,14 @@ const Dashboard = ({ transactions, accounts, onNavigate, cashBal: cashBalProp })
   const invest   = accounts.filter(a=>a.type==="investimento").reduce((s,a)=>s+a.balance,0);
   const cashBal  = cashBalProp ?? 0;
 
+  // Saldo anterior = saldo atual - (receitas - despesas) de TODOS os lançamentos do app.
+  // Representa o dinheiro que já existia nas contas/carteira antes de começar a usar o sistema.
+  const allTxsNoTransfer = transactions.filter(t=>!t.internalTransfer);
+  const totalReceitasAll = allTxsNoTransfer.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const totalDespesasAll = allTxsNoTransfer.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const saldoAnterior = (total + cashBal) - (totalReceitasAll - totalDespesasAll);
+
+
   const byCat = {};
   thisM.filter(t=>t.amount<0&&!t.internalTransfer).forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
   const catR = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,6);
@@ -2004,6 +2012,7 @@ const Dashboard = ({ transactions, accounts, onNavigate, cashBal: cashBalProp })
         <div onClick={()=>onNavigate("carteira")} style={{ cursor:"pointer" }}>
           <StatCard label="Patrimônio total" value={brl(total+cashBal)} sub="contas + dinheiro" icon="🏦" color={C.goldLight} />
         </div>
+        <StatCard label="Saldo anterior"     value={brl(saldoAnterior)}      sub="antes dos lançamentos no app" icon="🕓" color={C.muted} />
         <StatCard label="Receitas do mês"   value={brl(receitas)}           sub={new Date().toLocaleString("pt-BR",{month:"long"})} icon="📈" color={C.green} />
         <StatCard label="Despesas do mês"   value={brl(Math.abs(despesas))} sub="excl. transferências internas" icon="📉" color={C.red} />
         <div onClick={()=>onNavigate("carteira")} style={{ cursor:"pointer" }}>
@@ -2156,7 +2165,7 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
       </div>
 
       {/* Totais */}
-      <div style={{ display:"flex", gap:12 }}>
+      <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
         <div style={{ background:C.green+"15", border:`1px solid ${C.green}30`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.green, fontFamily:"'DM Sans',sans-serif" }}>
           Entradas: <strong>{brl(totRec)}</strong>
         </div>
@@ -2166,6 +2175,19 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
         <div style={{ background:C.border, borderRadius:10, padding:"10px 20px", fontSize:13, color: (totRec+totDes)>=0?C.green:C.red, fontFamily:"'DM Sans',sans-serif" }}>
           Saldo: <strong>{brl(totRec+totDes)}</strong>
         </div>
+        {filter.account && (() => {
+          const acc = accounts.find(a=>a.id===filter.account);
+          if (!acc) return null;
+          const allAccTxs = transactions.filter(t=>t.accountId===filter.account && !t.internalTransfer);
+          const rec = allAccTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+          const des = allAccTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+          const anterior = (acc.balance||0) - (rec - des);
+          return (
+            <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:10, padding:"10px 20px", fontSize:13, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+              🕓 Saldo anterior ({acc.name}): <strong style={{color:C.soft}}>{brl(anterior)}</strong>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Lista de transações — cards no mobile, tabela no desktop */}
@@ -3011,7 +3033,7 @@ function saveCashTxs(txs) {
   localStorage.setItem(CASH_STORAGE_KEY, JSON.stringify(txs));
 }
 
-const Carteira = ({ accounts, onCashChange }) => {
+const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
   const [cashTxs, setCashTxs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editCash, setEditCash] = useState(null);
@@ -3054,6 +3076,15 @@ const Carteira = ({ accounts, onCashChange }) => {
   const cashClaudia = cashTxs.filter(t=>t.owner==="claudia").reduce((s,t)=>s+parseFloat(t.amount||0),0);
   const accountsTotal = accounts.reduce((s, a) => s + a.balance, 0);
   const grandTotal = accountsTotal + cashBalance;
+
+  // Saldo anterior total: o que já existia antes de começar a lançar no app
+  const allTxsNoTransfer = transactions.filter(t=>!t.internalTransfer);
+  const allRec = allTxsNoTransfer.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+  const allDes = allTxsNoTransfer.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const cashRec = cashTxs.filter(t=>parseFloat(t.amount)>0).reduce((s,t)=>s+parseFloat(t.amount),0);
+  const cashDes = cashTxs.filter(t=>parseFloat(t.amount)<0).reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
+  const saldoAnteriorTotal = grandTotal - ((allRec + cashRec) - (allDes + cashDes));
+
 
   const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
   const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: parseFloat(tx.amount) >= 0 ? "entrada" : "saida", amount: Math.abs(parseFloat(tx.amount)).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
@@ -3130,20 +3161,35 @@ const Carteira = ({ accounts, onCashChange }) => {
     <div style={{ fontSize: 10, color: C.goldDim, letterSpacing: 3, textTransform: "uppercase", fontFamily: "'DM Sans',sans-serif", marginBottom: 10, marginTop: 4 }}>{label}</div>
   );
 
-  const AccountRow = ({ a }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
-        <div>
-          <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif" }}>{a.name}</div>
-          <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{typeLabel[a.type] || a.type}</div>
+  // Saldo anterior de uma conta: saldo atual - (receitas - despesas) lançadas nessa conta
+  const saldoAnteriorConta = (accId) => {
+    const txs = transactions.filter(t => t.accountId === accId && !t.internalTransfer);
+    const rec = txs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const des = txs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    const acc = accounts.find(a=>a.id===accId);
+    return (acc?.balance||0) - (rec - des);
+  };
+
+  const AccountRow = ({ a }) => {
+    const anterior = saldoAnteriorConta(a.id);
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.color, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif" }}>{a.name}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{typeLabel[a.type] || a.type}</div>
+            {Math.abs(anterior) > 0.005 && (
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: "'DM Sans',sans-serif", marginTop:2 }}>Saldo anterior: {brl(anterior)}</div>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize: 16, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: a.balance >= 0 ? C.text : C.red }}>
+          {brl(a.balance)}
         </div>
       </div>
-      <div style={{ fontSize: 16, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: a.balance >= 0 ? C.text : C.red }}>
-        {brl(a.balance)}
-      </div>
-    </div>
-  );
+    );
+  };
 
   // Subtotals
   const subOf = (arr) => arr.reduce((s, a) => s + a.balance, 0);
@@ -3167,6 +3213,7 @@ const Carteira = ({ accounts, onCashChange }) => {
           {[
             ["🏦 Contas", brl(accountsTotal), "#60a5fa"],
             ["💵 Dinheiro", brl(cashBalance), cashBalance >= 0 ? "#34d399" : "#f87171"],
+            ["🕓 Saldo anterior", brl(saldoAnteriorTotal), "#94a3b8"],
           ].map(([label, val, col]) => (
             <div key={label} style={{ background: "rgba(255,255,255,0.07)", borderRadius: 12, padding: "12px 16px", flex: 1 }}>
               <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "'DM Sans',sans-serif", marginBottom: 4 }}>{label}</div>
@@ -5285,7 +5332,7 @@ export default function App() {
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="analise"      && <AnaliseIA    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
-              {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} />}
+              {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} transactions={transactions} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas />}
               {nav==="metas"        && <Metas        transactions={transactions} />}
