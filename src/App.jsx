@@ -2681,9 +2681,15 @@ const Comprovantes = ({ accounts, onAddTx }) => {
     setStep("review");
   };
 
-  const confirm = () => {
-    onAddTx({ ...form, amount: form.type==="receita" ? Math.abs(form.amount) : -Math.abs(form.amount) });
-    setStep("done");
+  const confirm = async () => {
+    const rawAmt = parseFloat(String(form.amount).replace(",",".")) || 0;
+    const finalAmt = form.type==="receita" ? Math.abs(rawAmt) : -Math.abs(rawAmt);
+    try {
+      await onAddTx({ ...form, amount: finalAmt });
+      setStep("done");
+    } catch(e) {
+      alert("Erro ao salvar: " + e.message);
+    }
   };
 
   return (
