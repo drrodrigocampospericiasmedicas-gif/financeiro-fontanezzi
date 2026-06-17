@@ -4960,7 +4960,10 @@ export default function App() {
 
     // 4. Persistir no Supabase em background (sem await — não bloqueia UI)
     dbFrom("transactions").then(async tbl => {
-      if (!tbl) return;
+      if (!tbl) {
+        showToast("⚠️ Sessão expirada — reabra o app para sincronizar");
+        return;
+      }
       if (existingTx) {
         await tbl.update({
           account_id: tx.accountId,
@@ -4997,7 +5000,10 @@ export default function App() {
           }
         }
       }
-    }).catch(err => console.error("[saveTx] erro ao persistir:", err));
+    }).catch(err => {
+      console.error("[saveTx] erro ao persistir:", err);
+      showToast("⚠️ Erro ao salvar no banco: " + (err.message || err));
+    });
   };
 
   const deleteTx = async (id) => {
