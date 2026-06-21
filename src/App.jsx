@@ -72,6 +72,8 @@ const DEFAULT_CATEGORIES = [
   { id: "condominio",    label: "Condomínio",    icon: "🏢",  color: "#7f8c8d" },
   { id: "agua",          label: "Água",          icon: "💧",  color: "#3498db" },
   { id: "luz",           label: "Luz",           icon: "💡",  color: "#f1c40f" },
+  { id: "internet",      label: "Internet",      icon: "🌐",  color: "#2980b9" },
+  { id: "tv_assinatura", label: "TV por Assinatura", icon: "📺", color: "#8e44ad" },
   { id: "celular",       label: "Celular (Casal)",icon: "📱", color: "#1abc9c" },
   { id: "celular_daniel",label: "Celular Daniel", icon: "📲", color: "#16a085" },
   { id: "vestuario",     label: "Vestuário",     icon: "👔",  color: "#5cc9e0" },
