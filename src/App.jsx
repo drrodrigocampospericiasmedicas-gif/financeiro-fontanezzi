@@ -1056,6 +1056,391 @@ function exportCSV(transactions, accounts, period) {
 }
 
 
+// ─── CONSULTA POR IA (comando de voz ou texto) ───────────────────────────────
+const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cashTxs=[] }) => {
+  const [query, setQuery]         = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [result, setResult]       = useState(null);
+  const [error, setError]         = useState("");
+  const [listening, setListening] = useState(false);
+  const recognitionRef            = useRef(null);
+
+  // ── Web Speech API (microfone) ───────────────────────────────────────────────
+  const startListening = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setError("Microfone não suportado neste navegador. Use o campo de texto."); return; }
+    const rec = new SR();
+    rec.lang = "pt-BR";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onstart  = () => setListening(true);
+    rec.onend    = () => setListening(false);
+    rec.onerror  = (e) => { setListening(false); setError("Erro no microfone: " + e.error); };
+    rec.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      setQuery(text);
+      setListening(false);
+    };
+    rec.start();
+    recognitionRef.current = rec;
+  };
+
+  const stopListening = () => { recognitionRef.current?.stop(); setListening(false); };
+
+  // ── Montar contexto financeiro completo para passar à IA ────────────────────
+  const buildContext = () => {
+    const allTxs = [
+      ...transactions.filter(t=>!t.internalTransfer).map(t=>({...t, origem:"conta"})),
+      ...cashTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"dinheiro"})),
+      ...cartaoTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"cartao"})),
+    ];
+
+    // Resumo por categoria (todas as datas)
+    const byCat = {};
+    allTxs.filter(t=>t.amount<0).forEach(t=>{
+      const cat = t.category||"outros";
+      if (!byCat[cat]) byCat[cat] = { total:0, txs:[] };
+      byCat[cat].total += Math.abs(t.amount);
+      byCat[cat].txs.push({ date:t.date, desc:t.description, val:Math.abs(t.amount), origem:t.origem });
+    });
+
+    const catLines = Object.entries(byCat)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .map(([id,v])=>{
+        const label = catOf(id).label;
+        const top3 = v.txs.sort((a,b)=>b.val-a.val).slice(0,3).map(t=>`${t.date}:${t.desc}(${brl(t.val)})`).join(", ");
+        return `${label}: total R$${v.total.toFixed(2)}, ex: ${top3}`;
+      }).join("\n");
+
+    const totalRec = allTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
+    const totalDes = allTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    const patrimonio = accounts.reduce((s,a)=>s+(a.balance||0),0) + (parseFloat(cashBal)||0);
+
+    return { catLines, totalRec, totalDes, patrimonio };
+  };
+
+  // ── Executar consulta ────────────────────────────────────────────────────────
+  const runQuery = async () => {
+    if (!query.trim()) return;
+    setLoading(true); setError(""); setResult(null);
+
+    try {
+      const ctx = buildContext();
+
+      const prompt = `Você é um assistente financeiro pessoal para uma família brasileira (médico ortopedista e esposa). 
+Você tem acesso aos dados financeiros completos abaixo e deve responder ao comando do usuário de forma clara, detalhada e com dados reais.
+
+DADOS FINANCEIROS DISPONÍVEIS:
+- Patrimônio total: R$ ${ctx.patrimonio.toFixed(2)}
+- Total receitas registradas: R$ ${ctx.totalRec.toFixed(2)}
+- Total despesas registradas: R$ ${ctx.totalDes.toFixed(2)}
+
+GASTOS POR CATEGORIA (com exemplos de lançamentos):
+${ctx.catLines}
+
+COMANDO DO USUÁRIO: "${query}"
+
+Com base nos dados acima, execute o comando do usuário. Seja específico com os valores reais. Se o usuário pedir análise de categorias específicas, use os dados delas. Se pedir gráfico, inclua dados para geração.
+
+Retorne SOMENTE um JSON válido, sem markdown, no formato:
+{
+  "titulo": "título curto da análise",
+  "resumo": "parágrafo resumo da análise (2-4 frases com valores reais)",
+  "insights": ["insight 1 com valores reais", "insight 2", "insight 3"],
+  "categorias_analisadas": [
+    {"label": "nome", "valor": numero, "cor": "#hexcolor", "percentual": numero}
+  ],
+  "recomendacoes": ["recomendação específica 1", "recomendação 2"],
+  "periodo": "descrição do período analisado"
+}`;
+
+      const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(()=>"");
+        throw new Error(`HTTP ${res.status}: ${errText.slice(0,200)}`);
+      }
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "";
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("Resposta inesperada da IA");
+      const parsed = JSON.parse(match[0]);
+      setResult(parsed);
+    } catch(e) {
+      setError("Erro: " + (e.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Exportar HTML ────────────────────────────────────────────────────────────
+  const exportHTML = () => {
+    if (!result) return;
+    const total = result.categorias_analisadas.reduce((s,c)=>s+c.valor,0)||1;
+    const bars = result.categorias_analisadas.map(c=>`
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:13px;color:#333">${c.label}</span>
+          <span style="font-size:13px;font-weight:600">R$ ${c.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})} (${c.percentual?.toFixed(1)}%)</span>
+        </div>
+        <div style="height:10px;background:#eee;border-radius:6px">
+          <div style="height:100%;width:${(c.valor/total*100).toFixed(1)}%;background:${c.cor};border-radius:6px"></div>
+        </div>
+      </div>`).join("");
+
+    // Donut SVG
+    let cumAngle = -Math.PI/2;
+    const r=70; const cx=90; const cy=90;
+    const paths = result.categorias_analisadas.map(c=>{
+      const angle = (c.valor/total)*2*Math.PI;
+      const x1=cx+r*Math.cos(cumAngle); const y1=cy+r*Math.sin(cumAngle);
+      cumAngle+=angle;
+      const x2=cx+r*Math.cos(cumAngle); const y2=cy+r*Math.sin(cumAngle);
+      const large=angle>Math.PI?1:0;
+      return `<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${c.cor}" opacity="0.85"/>`;
+    }).join("");
+    const donut = `<svg width="180" height="180" viewBox="0 0 180 180">${paths}<circle cx="${cx}" cy="${cy}" r="35" fill="white"/></svg>`;
+
+    const legend = result.categorias_analisadas.map(c=>`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="width:12px;height:12px;border-radius:3px;background:${c.cor};flex-shrink:0"></div>
+        <span style="font-size:12px;color:#555">${c.label} — R$ ${c.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span>
+      </div>`).join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>${result.titulo}</title>
+<style>
+  body{font-family:'Segoe UI',sans-serif;max-width:700px;margin:0 auto;padding:32px;background:#f8f9fa;color:#1a1a2e}
+  h1{font-family:Georgia,serif;font-size:28px;color:#1a1a2e;margin-bottom:4px}
+  .periodo{font-size:12px;color:#888;margin-bottom:24px}
+  .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:12px}
+  .resumo{font-size:15px;line-height:1.7;color:#333}
+  .insights li,.recomendacoes li{font-size:14px;line-height:1.8;color:#444}
+  .chart-row{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+  @media print{body{padding:16px}}
+</style>
+</head>
+<body>
+  <h1>${result.titulo}</h1>
+  <div class="periodo">Consulta: "${query}" · ${result.periodo} · Gerado em ${new Date().toLocaleDateString("pt-BR")}</div>
+
+  <div class="card">
+    <h2>Resumo</h2>
+    <p class="resumo">${result.resumo}</p>
+  </div>
+
+  <div class="card">
+    <h2>Distribuição por Categoria</h2>
+    <div class="chart-row">
+      <div>${donut}</div>
+      <div style="flex:1">${legend}</div>
+    </div>
+    <div style="margin-top:20px">${bars}</div>
+  </div>
+
+  <div class="card">
+    <h2>Insights</h2>
+    <ul class="insights">${result.insights.map(i=>`<li>${i}</li>`).join("")}</ul>
+  </div>
+
+  <div class="card">
+    <h2>Recomendações</h2>
+    <ul class="recomendacoes">${result.recomendacoes.map(r=>`<li>${r}</li>`).join("")}</ul>
+  </div>
+
+  <div style="text-align:center;margin-top:32px;font-size:11px;color:#bbb">
+    Financeiro Fontanezzi · Análise gerada por IA · Dados reais do app
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `consulta-${result.titulo.replace(/\s+/g,"-").toLowerCase()}-${new Date().toISOString().slice(0,10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+  const examples = [
+    "Analise meus gastos com moradia, internet, celular e TV",
+    "Compare receitas e despesas dos últimos meses",
+    "Onde posso economizar mais este mês?",
+    "Mostre os maiores gastos por categoria",
+    "Analise os gastos com alimentação e restaurantes",
+  ];
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+      <Card>
+        <SectionTitle>Consulta Financeira por IA</SectionTitle>
+        <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
+          Faça uma pergunta ou peça uma análise em linguagem natural. Use o microfone ou digite. A IA consulta seus dados reais e gera um relatório exportável.
+        </div>
+
+        {/* Campo de texto + microfone */}
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <textarea
+            value={query}
+            onChange={e=>setQuery(e.target.value)}
+            placeholder='Ex: "Analise meus gastos com moradia, internet e TV por assinatura"'
+            rows={3}
+            style={{ ...IS, flex:1, resize:"vertical", lineHeight:1.5 }}
+          />
+          <button
+            onClick={listening ? stopListening : startListening}
+            style={{
+              width:50, height:50, borderRadius:"50%", border:"none", cursor:"pointer", flexShrink:0,
+              alignSelf:"flex-start",
+              background: listening ? "#e74c3c" : C.gold,
+              color: listening ? "#fff" : "#1a1a2e",
+              fontSize:20, display:"flex", alignItems:"center", justifyContent:"center",
+              boxShadow: listening ? "0 0 0 4px rgba(231,76,60,0.3)" : "none",
+              transition:"all 0.2s",
+            }}
+            title={listening ? "Parar gravação" : "Falar comando"}
+          >
+            {listening ? "⏹" : "🎙️"}
+          </button>
+        </div>
+
+        {listening && (
+          <div style={{ fontSize:12, color:"#e74c3c", fontFamily:"'DM Sans',sans-serif", marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background:"#e74c3c", animation:"pulse 1s infinite" }}/>
+            Ouvindo... fale seu comando
+          </div>
+        )}
+
+        {/* Exemplos */}
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:16 }}>
+          {examples.map((ex,i)=>(
+            <button key={i} onClick={()=>setQuery(ex)} style={{
+              background:"transparent", border:`1px solid ${C.border}`, borderRadius:20,
+              padding:"5px 12px", fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif",
+              cursor:"pointer"
+            }}>{ex}</button>
+          ))}
+        </div>
+
+        <button
+          onClick={runQuery}
+          disabled={loading || !query.trim()}
+          style={{
+            background: C.gold, border:"none", color:"#1a1a2e", borderRadius:8,
+            padding:"11px 22px", fontSize:13, fontWeight:600,
+            fontFamily:"'DM Sans',sans-serif",
+            cursor: (loading||!query.trim()) ? "default":"pointer",
+            opacity: (loading||!query.trim()) ? 0.6:1
+          }}
+        >{loading ? "🤖 Analisando..." : "🤖 Executar consulta"}</button>
+
+        {error && (
+          <div style={{ marginTop:12, fontSize:12, color:C.red, fontFamily:"'DM Sans',sans-serif", background:C.surface, borderRadius:8, padding:"10px 14px" }}>
+            {error}
+          </div>
+        )}
+      </Card>
+
+      {/* Resultado */}
+      {result && (
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontSize:20, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.text }}>{result.titulo}</div>
+            <button onClick={exportHTML} style={{
+              background:C.green, border:"none", color:"#fff", borderRadius:8,
+              padding:"9px 16px", fontSize:12, fontWeight:600,
+              fontFamily:"'DM Sans',sans-serif", cursor:"pointer"
+            }}>📄 Exportar HTML</button>
+          </div>
+
+          <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>
+            {result.periodo} · Consulta: "{query}"
+          </div>
+
+          {/* Resumo */}
+          <Card>
+            <SectionTitle>Resumo</SectionTitle>
+            <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.7 }}>{result.resumo}</div>
+          </Card>
+
+          {/* Gráfico donut + barras */}
+          {result.categorias_analisadas?.length > 0 && (() => {
+            const total = result.categorias_analisadas.reduce((s,c)=>s+c.valor,0)||1;
+            return (
+              <Card>
+                <SectionTitle>Distribuição por Categoria</SectionTitle>
+                <DonutChart
+                  slices={result.categorias_analisadas.map(c=>({ label:c.label, value:c.valor, color:c.cor, icon:"" }))}
+                  size={180}
+                />
+                <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:16 }}>
+                  {result.categorias_analisadas.map((c,i)=>(
+                    <div key={i}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                        <span style={{ fontSize:12, color:C.soft, fontFamily:"'DM Sans',sans-serif" }}>{c.label}</span>
+                        <span style={{ fontSize:13, fontFamily:"'Cormorant Garamond',serif", fontWeight:600 }}>
+                          {brl(c.valor)} <span style={{ fontSize:11, color:C.muted, fontWeight:400 }}>({c.percentual?.toFixed(1)}%)</span>
+                        </span>
+                      </div>
+                      <div style={{ height:8, background:C.border, borderRadius:6 }}>
+                        <div style={{ height:"100%", width:`${(c.valor/total*100).toFixed(1)}%`, background:c.cor, borderRadius:6, transition:"width .5s" }}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })()}
+
+          {/* Insights */}
+          {result.insights?.length > 0 && (
+            <Card>
+              <SectionTitle>Insights</SectionTitle>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {result.insights.map((ins,i)=>(
+                  <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", background:C.surface, borderRadius:10, padding:"10px 14px" }}>
+                    <span style={{ fontSize:16, flexShrink:0 }}>💡</span>
+                    <span style={{ fontSize:13, color:C.soft, fontFamily:"'DM Sans',sans-serif", lineHeight:1.5 }}>{ins}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Recomendações */}
+          {result.recomendacoes?.length > 0 && (
+            <Card>
+              <SectionTitle>Recomendações</SectionTitle>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {result.recomendacoes.map((rec,i)=>(
+                  <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", background:C.surface, borderRadius:10, padding:"10px 14px" }}>
+                    <span style={{ fontSize:16, flexShrink:0 }}>✅</span>
+                    <span style={{ fontSize:13, color:C.soft, fontFamily:"'DM Sans',sans-serif", lineHeight:1.5 }}>{rec}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 // ─── ANÁLISE IA & INVESTIMENTOS ─────────────────────────────────────────────────
 const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
   const [tab, setTab] = useState("gastos"); // gastos | investimentos
@@ -5134,13 +5519,15 @@ export default function App() {
     { id:"comprovantes",label:"Comprovantes", icon:"📷" },
     { id:"contas",      label:"Contas",       icon:"⬡"  },
     { id:"analise",     label:"Análise IA",   icon:"🤖" },
+    { id:"consulta",     label:"Consulta IA",  icon:"🎙️" },
   ];
 
   const pageTitle = {
     dashboard:"Visão Geral", extrato:"Movimentações", relatorios:"Relatórios",
     carteira:"Carteira", cartoes:"Cartões de Crédito", dividas:"Dívidas & Financiamentos",
     metas:"Metas", importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas",
-    analise:"Análise IA & Investimentos"
+    analise:"Análise IA & Investimentos",
+    consulta:"Consulta por IA"
   };
 
   const bottomNav = [
@@ -5282,6 +5669,7 @@ export default function App() {
               {nav==="extrato"      && <Extrato      transactions={transactions} accounts={accounts} onEdit={t=>{setEditTx(t);}} onDelete={deleteTx} onAdd={()=>setForm(true)} />}
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="analise"      && <AnaliseIA    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
+              {nav==="consulta"     && <ConsultaIA   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} transactions={transactions} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas transactions={transactions} cashTxs={cashTxsGlobal} cartaoTxs={cartaoTxs} />}
