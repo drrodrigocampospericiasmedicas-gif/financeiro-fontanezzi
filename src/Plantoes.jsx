@@ -440,7 +440,7 @@ async function generateMultiMonthHTML(plantoes, selectedKeys) {
 </style></head><body>
   <div class="header">
     <div><div class="title">Plantões<br>Dr. Rodrigo Fontanezzi</div>
-    <div class="subtitle">CRM 97684-9 · RQE 32466 · Ortopedia e Traumatologia</div></div>
+    <div class="subtitle">CRM/SP 168587 · RQE 70186 · Ortopedia e Traumatologia</div></div>
     <div><div class="period-label">Período</div><div class="period-value">${periodLabel}</div></div>
   </div>
   <div class="totals">
@@ -574,7 +574,7 @@ async function generateAndSharePDF(plantoes, month, year) {
 </style></head><body>
   <div class="header">
     <div><div class="title">Plantões<br>Dr. Rodrigo Fontanezzi</div>
-    <div class="subtitle">CRM 97684-9 · RQE 32466 · Ortopedia e Traumatologia</div></div>
+    <div class="subtitle">CRM/SP 168587 · RQE 70186 · Ortopedia e Traumatologia</div></div>
     <div><div class="period-label">Período</div><div class="period-value">${MONTHS[month]} ${year}</div></div>
   </div>
   <div class="totals">
