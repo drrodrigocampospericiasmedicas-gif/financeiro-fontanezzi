@@ -3,6 +3,7 @@
   "name": "Financeiro Fontanezzi",
   "short_name": "Fontanezzi",
   "description": "Controle financeiro familiar Fontanezzi",
+  "version": "1.1.0",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
