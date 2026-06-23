@@ -101,22 +101,51 @@ const DEFAULT_CATEGORIES = [
 
 // ─── SUBCATEGORIAS por categoria principal ────────────────────────────────────
 const SUBCATEGORIES = {
-  trabalho:      ["Gasolina","Pedágio","Almoço","Café","Estacionamento","Hospedagem","IA/Assinaturas","Material","Outros"],
-  moradia:       ["Manutenção","Reforma","Decoração","Limpeza","Outros"],
+  // Trabalho: carro, gasolina, café, almoço, jantar, pedágio, IA, outros
+  trabalho:      ["Gasolina","Pedágio","Almoço","Café","Jantar","Estacionamento","IA/Assinaturas","Hospedagem","Material","Carro","Outros"],
+
+  // Casa: TV por assinatura, Internet, água, luz, condomínio, manutenção, outros
+  moradia:       ["TV por Assinatura","Internet","Água","Luz","Condomínio","Manutenção","Reforma","Decoração","Limpeza","Outros"],
+  condominio:    ["Taxa Condominial","Fundo de Reserva","Multa","Outros"],
+  agua:          ["Conta Mensal","Multa","Outros"],
+  luz:           ["Conta Mensal","Multa","Outros"],
+  internet:      ["Mensalidade","Instalação","Outros"],
+  tv_assinatura: ["Mensalidade","Pay-per-view","Outros"],
+  celular:       ["Plano Mensal","Recarga","Outros"],
+  celular_daniel:["Plano Mensal","Recarga","Outros"],
+
+  // Alimentação
   alimentacao:   ["Delivery","Lanche","Mercadinho","Outros"],
   restaurante:   ["Almoço","Jantar","Café","Happy Hour","Outros"],
   supermercado:  ["Compras Semanais","Compras Mensais","Higiene","Limpeza","Outros"],
-  saude:         ["Consulta","Exame","Cirurgia","Fisioterapia","Vacina","Outros"],
-  educacao:      ["Mensalidade","Material","Curso","Livros","Outros"],
-  lazer:         ["Cinema/Teatro","Viagem","Esporte","Streaming","Restaurante","Outros"],
-  transporte:    ["Gasolina","Pedágio","Uber/99","Manutenção","IPVA/Seguro","Outros"],
-  vestuario:     ["Roupas","Calçados","Acessórios","Outros"],
-  financeiro:    ["Financiamento","Seguro","Tarifa","Investimento","Outros"],
-  bela:          ["Ração","Veterinário","Banho/Tosa","Petiscos","Outros"],
-  divida:        ["Cartão","Financiamento","Empréstimo","Outros"],
-  empregada:     ["Salário","FGTS","Vale","Outros"],
-  taxas:         ["IOF","Tarifa TED","Tarifa DOC","Manutenção conta","Outros"],
+  padaria:       ["Pão","Lanche","Doce","Café","Outros"],
+  feira:         ["Frutas","Verduras","Legumes","Outros"],
+
+  // Saúde
+  saude:         ["Consulta Médica","Exame","Cirurgia","Fisioterapia","Vacina","Plano de Saúde","Outros"],
+  farmacia:      ["Medicamento","Suplemento","Higiene","Outros"],
+
+  // Educação
+  educacao:      ["Mensalidade Escola","Curso","Material Escolar","Livros","Uniforme","Outros"],
+
+  // Lazer
+  lazer:         ["Cinema/Teatro","Viagem","Esporte","Streaming","Passeio","Restaurante","Outros"],
+
+  // Transporte
+  transporte:    ["Gasolina","Pedágio","Uber/99","Manutenção carro","IPVA","Seguro carro","Outros"],
   gasolina:      ["Trabalho","Passeio","Viagem","Outros"],
+
+  // Vestuário
+  vestuario:     ["Roupas","Calçados","Acessórios","Moda Íntima","Outros"],
+
+  // Financeiro/Dívidas
+  financeiro:    ["Financiamento","Seguro","Tarifa","Investimento","Outros"],
+  divida:        ["Financiamento","Cartão","Empréstimo","Consignado","Outros"],
+  taxas:         ["IOF","Tarifa TED","Tarifa DOC","Manutenção conta","Outros"],
+
+  // Casa e pessoas
+  empregada:     ["Salário","FGTS","Vale Transporte","Vale Alimentação","Outros"],
+  bela:          ["Ração","Veterinário","Banho/Tosa","Petiscos","Remédio","Outros"],
 };
 
 const subOf = (catId) => SUBCATEGORIES[catId] || [];
