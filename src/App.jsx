@@ -102,7 +102,7 @@ const DEFAULT_CATEGORIES = [
 // ─── SUBCATEGORIAS por categoria principal ────────────────────────────────────
 const SUBCATEGORIES = {
   // Trabalho: carro, gasolina, café, almoço, jantar, pedágio, IA, outros
-  trabalho:      ["Gasolina","Pedágio","Almoço","Café","Jantar","Estacionamento","IA/Assinaturas","Hospedagem","Material","Carro","Outros"],
+  trabalho:      ["Gasolina","Pedágio","Almoço","Café","Jantar","Estacionamento","IA/Assinaturas","Hospedagem","Material","Carro","Aluguel de Carro","Outros"],
 
   // Casa: TV por assinatura, Internet, água, luz, condomínio, manutenção, outros
   moradia:       ["TV por Assinatura","Internet","Água","Luz","Condomínio","Manutenção","Reforma","Decoração","Limpeza","Outros"],
