@@ -98,6 +98,29 @@ const DEFAULT_CATEGORIES = [
   { id: "outros",        label: "Outros",        icon: "📦",  color: "#9a98a0" },
 ];
 
+
+// ─── SUBCATEGORIAS por categoria principal ────────────────────────────────────
+const SUBCATEGORIES = {
+  trabalho:      ["Gasolina","Pedágio","Almoço","Café","Estacionamento","Hospedagem","IA/Assinaturas","Material","Outros"],
+  moradia:       ["Manutenção","Reforma","Decoração","Limpeza","Outros"],
+  alimentacao:   ["Delivery","Lanche","Mercadinho","Outros"],
+  restaurante:   ["Almoço","Jantar","Café","Happy Hour","Outros"],
+  supermercado:  ["Compras Semanais","Compras Mensais","Higiene","Limpeza","Outros"],
+  saude:         ["Consulta","Exame","Cirurgia","Fisioterapia","Vacina","Outros"],
+  educacao:      ["Mensalidade","Material","Curso","Livros","Outros"],
+  lazer:         ["Cinema/Teatro","Viagem","Esporte","Streaming","Restaurante","Outros"],
+  transporte:    ["Gasolina","Pedágio","Uber/99","Manutenção","IPVA/Seguro","Outros"],
+  vestuario:     ["Roupas","Calçados","Acessórios","Outros"],
+  financeiro:    ["Financiamento","Seguro","Tarifa","Investimento","Outros"],
+  bela:          ["Ração","Veterinário","Banho/Tosa","Petiscos","Outros"],
+  divida:        ["Cartão","Financiamento","Empréstimo","Outros"],
+  empregada:     ["Salário","FGTS","Vale","Outros"],
+  taxas:         ["IOF","Tarifa TED","Tarifa DOC","Manutenção conta","Outros"],
+  gasolina:      ["Trabalho","Passeio","Viagem","Outros"],
+};
+
+const subOf = (catId) => SUBCATEGORIES[catId] || [];
+
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 let _sbUrl = null, _sbKey = null;
 
@@ -532,10 +555,10 @@ const SupabaseConfig = ({ onSave, onClose }) => {
 
 // ─── TRANSACTION FORM ─────────────────────────────────────────────────────────
 const TxForm = ({ accounts, onSave, onClose, initial }) => {
-  const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"", type:"despesa", internalTransfer:false, spender:"" };
+  const blank = { accountId:accounts[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", subcategory:"", notes:"", type:"despesa", internalTransfer:false, spender:"" };
   const [form, setForm] = useState(initial ? { ...initial, type: initial.amount>0?"receita": initial.internalTransfer?"transferencia":"despesa", amount: Math.abs(initial.amount).toString(), spender: initial.spender||"" } : blank);
   const [errors, setErrors] = useState({});
-  const set = (k,v) => { setForm(f=>({...f,[k]:v})); setErrors(e=>({...e,[k]:false})); };
+  const set = (k,v) => { setForm(f=>({...f,[k]:v, ...(k==="category"?{subcategory:""}:{})})); setErrors(e=>({...e,[k]:false})); };
 
   // Mostrar campo "quem gastou" somente: conta casal + não é taxas + é despesa
   const selectedAcc = accounts.find(a => a.id === form.accountId);
@@ -590,6 +613,14 @@ const TxForm = ({ accounts, onSave, onClose, initial }) => {
             <select style={IS} value={form.category} onChange={e=>set("category",e.target.value)}>
               {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
             </select></div>
+          {subOf(form.category).length > 0 && (
+            <div><div style={{ fontSize:11, color:C.muted, marginBottom:5, fontFamily:"'DM Sans',sans-serif" }}>SUBCATEGORIA</div>
+              <select style={IS} value={form.subcategory||""} onChange={e=>set("subcategory",e.target.value)}>
+                <option value="">— Selecionar —</option>
+                {subOf(form.category).map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
           {showSpender && (
             <div style={{ gridColumn:"1/-1" }}>
               <div style={{ fontSize:11, color:C.muted, marginBottom:8, fontFamily:"'DM Sans',sans-serif" }}>QUEM GASTOU?</div>
@@ -2644,7 +2675,7 @@ const Extrato = ({ transactions, accounts, onEdit, onDelete, onAdd }) => {
                     {t.description}
                   </div>
                   <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginTop:2 }}>
-                    {fdate(t.date)} · {acc?.name||"—"} · <span style={{color:cat.color}}>{cat.label}</span>
+                    {fdate(t.date)} · {acc?.name||"—"} · <span style={{color:cat.color}}>{cat.label}{t.subcategory ? ` › ${t.subcategory}` : ""}</span>
                     {t.spender && t.spender !== "casal" && (
                       <span style={{ marginLeft:5, fontSize:10, background: t.spender==="rodrigo"?"#7c6dc922":"#c96da022", color: t.spender==="rodrigo"?"#7c6dc9":"#c96da0", borderRadius:4, padding:"1px 5px" }}>
                         {t.spender==="rodrigo"?"👨 Rodrigo":"👩 Cláudia"}
@@ -3762,7 +3793,7 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
                     <div style={{ fontSize: 18 }}>{cat.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: C.text, fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.description}</div>
-                      <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{fdate(t.date)} · {ownerIcon} · {cat.label}</div>
+                      <div style={{ fontSize: 11, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>{fdate(t.date)} · {ownerIcon} · {cat.label}{t.subcategory ? ` › ${t.subcategory}` : ""}</div>
                     </div>
                     <div style={{ fontSize: 15, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: t.amount > 0 ? C.green : C.text, minWidth: 80, textAlign: "right" }}>
                       {t.amount > 0 ? "+" : ""}{brl(t.amount)}
@@ -3904,6 +3935,15 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
                   ))}
                 </select>
               </div>
+              {subOf(form.category).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>SUBCATEGORIA</div>
+                  <select style={IS} value={form.subcategory||""} onChange={e=>sf("subcategory",e.target.value)}>
+                    <option value="">— Selecionar —</option>
+                    {subOf(form.category).map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <div style={{ fontSize: 11, color: C.muted, marginBottom: 5, fontFamily: "'DM Sans',sans-serif" }}>NOTAS</div>
                 <input style={IS} placeholder="Observações..." value={form.notes} onChange={e=>sf("notes",e.target.value)} />
@@ -5174,7 +5214,7 @@ export default function App() {
                   id: t.id, accountId: t.account_id || t.accountId,
                   date: t.date, description: t.description,
                   amount: parseFloat(t.amount), category: t.category || "outros",
-                  notes: t.notes || "", internalTransfer: t.internal_transfer || false, spender: t.spender || "",
+                  notes: t.notes || "", internalTransfer: t.internal_transfer || false, spender: t.spender || "", subcategory: t.subcategory || "",
                 })));
               }
               if (accRes?.data?.length) {
@@ -5251,7 +5291,7 @@ export default function App() {
             amount: parseFloat(t.amount),
             category: t.category || "outros",
             notes: t.notes || "",
-            internalTransfer: t.internal_transfer || t.internalTransfer || false,
+            internalTransfer: t.internal_transfer || t.internalTransfer || false, subcategory: t.subcategory || "",
                   spender: t.spender || "",
           }));
           setTxs(txs);
@@ -5361,6 +5401,7 @@ export default function App() {
           notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
           spender: tx.spender || "",
+          subcategory: tx.subcategory || "",
         }, { id: tx.id });
       } else {
         await tbl.insert({
@@ -5373,6 +5414,7 @@ export default function App() {
           notes: tx.notes || "",
           internal_transfer: tx.internalTransfer || false,
           spender: tx.spender || "",
+          subcategory: tx.subcategory || "",
         });
       }
       // Persistir saldo da conta no Supabase
@@ -5442,7 +5484,7 @@ export default function App() {
             amount: parseFloat(t.amount),
             category: t.category || "outros",
             notes: t.notes || "",
-            internalTransfer: t.internal_transfer || false,
+            internalTransfer: t.internal_transfer || false, subcategory: t.subcategory || "",
           }));
           // Atualizar estado local também
           setTxs(currentTxs);
