@@ -132,7 +132,7 @@ const SUBCATEGORIES = {
   lazer:         ["Cinema/Teatro","Viagem","Esporte","Streaming","Passeio","Restaurante","Outros"],
 
   // Transporte
-  transporte:    ["Gasolina","Pedágio","Uber/99","Manutenção carro","IPVA","Seguro carro","Outros"],
+  transporte:    ["Gasolina","Pedágio","Uber/99","Manutenção carro","IPVA","Seguro carro","Aluguel de Carro","Outros"],
   gasolina:      ["Trabalho","Passeio","Viagem","Outros"],
 
   // Vestuário
