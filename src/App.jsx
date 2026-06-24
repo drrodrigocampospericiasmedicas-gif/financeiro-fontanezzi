@@ -1519,6 +1519,7 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
   const [tab, setTab] = useState("gastos"); // gastos | investimentos
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [summary, setSummary]   = useState(null);
   const [error, setError] = useState("");
   const [selPeriods, setSelPeriods] = useState(() => {
     const y = TODAY.getFullYear();
@@ -1543,39 +1544,69 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
     const keys = Array.isArray(periodKeys) ? periodKeys : [periodKeys];
     const inPeriod = (date) => keys.some(k => date.startsWith(k));
 
-    const contaTxs  = transactions.filter(t => inPeriod(t.date) && t.amount<0 && !t.internalTransfer && t.category!=="pagamento_cartao");
-    const recTxs    = transactions.filter(t => inPeriod(t.date) && t.amount>0 && !t.internalTransfer);
-    const cashDes   = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
-    const cashRec   = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)>0);
-    const cardTxs   = cartaoTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
+    const contaTxs = transactions.filter(t => inPeriod(t.date) && t.amount<0 && !t.internalTransfer && t.category!=="pagamento_cartao");
+    const recTxs   = transactions.filter(t => inPeriod(t.date) && t.amount>0 && !t.internalTransfer);
+    const cashDes  = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
+    const cashRec  = cashTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)>0);
+    const cardTxs  = cartaoTxs.filter(t => inPeriod(t.date) && parseFloat(t.amount)<0);
 
-    const byCat = {};
-    const add = (cat, val) => { byCat[cat] = (byCat[cat]||0) + val; };
-    contaTxs.forEach(t => add(t.category||"outros", Math.abs(t.amount)));
-    cashDes.forEach(t => add(t.category||"outros", Math.abs(parseFloat(t.amount))));
-    cardTxs.forEach(t => add(t.category||"outros", Math.abs(parseFloat(t.amount))));
+    // Agrupar por categoria + subcategoria com lançamentos individuais
+    const byCatSub = {};
+    const addSub = (t, val) => {
+      const cat = t.category || "outros";
+      const sub = t.subcategory || "";
+      const catLbl = catOf(cat).label;
+      if (!byCatSub[cat]) byCatSub[cat] = { label:catLbl, color:catOf(cat).color, total:0, subs:{}, txs:[] };
+      byCatSub[cat].total += val;
+      byCatSub[cat].txs.push({ date:t.date, desc:t.description, val, sub, origem:t.origem||"" });
+      if (sub) {
+        if (!byCatSub[cat].subs[sub]) byCatSub[cat].subs[sub] = 0;
+        byCatSub[cat].subs[sub] += val;
+      }
+    };
+    contaTxs.forEach(t => addSub({...t, origem:"Conta"}, Math.abs(t.amount)));
+    cashDes.forEach(t => addSub({...t, amount:parseFloat(t.amount), origem:"Dinheiro"}, Math.abs(parseFloat(t.amount))));
+    cardTxs.forEach(t => addSub({...t, amount:parseFloat(t.amount), origem:"Cartão"}, Math.abs(parseFloat(t.amount))));
 
-    const totalDespesas = Object.values(byCat).reduce((s,v)=>s+v,0);
+    const totalDespesas = Object.values(byCatSub).reduce((s,v)=>s+v.total,0);
     const totalReceitas = recTxs.reduce((s,t)=>s+t.amount,0) + cashRec.reduce((s,t)=>s+parseFloat(t.amount),0);
 
-    const catBreakdown = Object.entries(byCat)
-      .sort((a,b)=>b[1]-a[1])
-      .map(([id,val]) => `${catOf(id).label}: R$ ${val.toFixed(2)} (${(val/totalDespesas*100).toFixed(1)}%)`)
-      .join("\\n");
+    // Breakdown detalhado por categoria com subcategorias e top lançamentos
+    const catBreakdown = Object.entries(byCatSub)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .map(([id,v]) => {
+        const pct = (v.total/totalDespesas*100).toFixed(1);
+        let line = `${v.label}: R$${v.total.toFixed(2)} (${pct}%)`;
+        // Subcategorias
+        const subs = Object.entries(v.subs).sort((a,b)=>b[1]-a[1]);
+        if (subs.length) line += "\n  Subcategorias: " + subs.map(([s,vl])=>`${s}=R$${vl.toFixed(2)}`).join(", ");
+        // Top 5 lançamentos individuais
+        const top = v.txs.sort((a,b)=>b.val-a.val).slice(0,5);
+        line += "\n  Lançamentos: " + top.map(t=>`[${t.date}] ${t.desc}${t.sub?" ("+t.sub+")":""} R$${t.val.toFixed(2)} ${t.origem}`).join(" | ");
+        return line;
+      }).join("\n\n");
 
-    // Top 10 maiores transações individuais do período
-    const allTxs = [
+    // Receitas detalhadas
+    const recByCat = {};
+    recTxs.forEach(t => { const l=catOf(t.category||"receita").label; recByCat[l]=(recByCat[l]||0)+t.amount; });
+    cashRec.forEach(t => { const l=catOf(t.category||"receita").label; recByCat[l]=(recByCat[l]||0)+parseFloat(t.amount); });
+    const recBreakdown = Object.entries(recByCat).sort((a,b)=>b[1]-a[1])
+      .map(([l,v])=>`${l}: R$${v.toFixed(2)}`).join(" | ");
+
+    // Top 15 maiores lançamentos
+    const allTxsList = [
       ...contaTxs.map(t=>({...t, origem:"Conta corrente"})),
       ...cashDes.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
       ...cardTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
-    ].sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)).slice(0,10);
+    ].sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)).slice(0,15);
+    const topTxs = allTxsList.map(t=>`${t.date} | ${t.description}${t.subcategory?" ("+t.subcategory+")":""} | R$${Math.abs(t.amount).toFixed(2)} | ${catOf(t.category).label} | ${t.origem}`).join("\n");
 
-    const topTxs = allTxs.map(t => `${t.date} | ${t.description} | R$ ${Math.abs(t.amount).toFixed(2)} | ${catOf(t.category).label} | ${t.origem}`).join("\\n");
-
+    // Dados para gráfico (retornamos também o byCatSub para exportação)
     return {
       totalDespesas, totalReceitas,
       saldo: totalReceitas - totalDespesas,
-      catBreakdown, topTxs,
+      catBreakdown, recBreakdown, topTxs,
+      byCatSub,
       numTxs: contaTxs.length + cashDes.length + cardTxs.length,
     };
   };
@@ -1591,6 +1622,7 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
       }
 
       const summary = buildFinancialSummary(selPeriods);
+      setSummary(summary);
       const sorted = [...selPeriods].sort();
       const periodLabel = sorted.map(k => {
         const [y,m] = k.split("-");
@@ -1604,34 +1636,39 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
         return;
       }
 
-      const prompt = `Você é um consultor financeiro pessoal experiente, direto e realista. Analise os dados financeiros de uma família brasileira (médico ortopedista e esposa) referentes a ${periodLabelDesc}.
+      const prompt = `Você é um consultor financeiro pessoal sênior de uma família brasileira (médico ortopedista e esposa). Faça uma análise DETALHADA, PROFUNDA e ESPECÍFICA usando EXCLUSIVAMENTE os dados reais abaixo. Não use frases genéricas.
 
-DADOS DO PERÍODO:
-- Receitas totais: R$ ${summary.totalReceitas.toFixed(2)}
-- Despesas totais: R$ ${summary.totalDespesas.toFixed(2)}
-- Saldo do período: R$ ${summary.saldo.toFixed(2)}
-- Patrimônio total em contas + dinheiro: R$ ${grandTotal.toFixed(2)}
+DADOS DO PERÍODO: ${periodLabelDesc}
+- Receitas: R$${summary.totalReceitas.toFixed(2)} (${summary.recBreakdown})
+- Despesas: R$${summary.totalDespesas.toFixed(2)}
+- Saldo: R$${summary.saldo.toFixed(2)} (${summary.totalReceitas>0?(summary.saldo/summary.totalReceitas*100).toFixed(1):0}% de poupança)
+- Patrimônio total: R$${grandTotal.toFixed(2)}
 
-GASTOS POR CATEGORIA:
+DESPESAS DETALHADAS POR CATEGORIA E SUBCATEGORIA:
 ${summary.catBreakdown}
 
-10 MAIORES LANÇAMENTOS DO PERÍODO:
+15 MAIORES LANÇAMENTOS:
 ${summary.topTxs}
 
-Sua tarefa, em português do Brasil:
-1. Identifique para onde o dinheiro está indo — quais categorias dominam o orçamento e se isso é saudável proporcionalmente à receita.
-2. Aponte de 3 a 5 oportunidades REALISTAS de redução de gastos, baseadas especificamente nos dados acima (não genéricas). Para cada uma, estime um valor aproximado de economia mensal.
-3. Avalie a taxa de poupança (saldo/receita) e diga se está em um nível saudável (referência: 20%+ é bom, abaixo de 10% é preocupante).
-4. Seja direto, sem rodeios, mas em tom construtivo — sem julgar o estilo de vida, focando em ajustes possíveis dentro da realidade da família.
+TAREFAS OBRIGATÓRIAS:
+1. PANORAMA: avalie a saúde financeira real com base nos números (taxa de poupança ideal: 20%+; preocupante: <10%). Cite os valores exatos.
+2. PARA ONDE VAI: analise as TOP 5 categorias de gasto. Para cada uma, cite o valor, percentual do total, e se está acima do esperado para a renda. Mencione subcategorias relevantes.
+3. OPORTUNIDADES: 4-6 sugestões ESPECÍFICAS com valor de economia estimado. Baseie em lançamentos reais (ex: "foram 3 lançamentos de pedágio totalizando R$X — usar rota alternativa pode economizar R$Y").
+4. PADRÕES: identifique padrões (gastos repetidos, dia da semana, concentração em determinados estabelecimentos).
+5. TAXA DE POUPANÇA: calcule e avalie com contexto (família de médico tem potencial de poupança maior).
 
-Retorne SOMENTE um objeto JSON, sem markdown, no formato:
+Retorne SOMENTE JSON válido sem markdown:
 {
-  "resumo": "1-2 frases sobre o panorama geral",
-  "para_onde_vai": "análise de 2-3 frases sobre os principais destinos do dinheiro",
+  "resumo": "2-3 frases com valores exatos descrevendo a situação real",
+  "para_onde_vai": "análise detalhada das top 5 categorias com valores e percentuais reais",
   "taxa_poupanca_pct": numero,
-  "avaliacao_poupanca": "1 frase avaliando a taxa de poupança",
+  "avaliacao_poupanca": "avaliação contextualizada com sugestão de meta realista",
+  "padroes": "1-2 frases sobre padrões identificados nos lançamentos",
+  "top_categorias": [
+    {"categoria": "nome", "valor": numero_exato, "percentual": numero, "avaliacao": "normal/alto/muito_alto", "detalhe": "frase com subcategorias e lançamentos relevantes"}
+  ],
   "oportunidades": [
-    {"categoria": "nome da categoria", "sugestao": "sugestão específica e realista", "economia_estimada": numero_mensal}
+    {"categoria": "categoria específica", "sugestao": "sugestão detalhada citando lançamentos reais", "economia_estimada": numero}
   ]
 }`;
 
@@ -1797,8 +1834,125 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
             </div>
           )}
 
-          {analysis && (
+          {analysis && (() => {
+            // Exportação HTML com gráficos e tabelas
+            const exportAnalise = () => {
+              const sumByCat = analysis.top_categorias || [];
+              const totalDes = sumByCat.reduce((s,c)=>s+c.valor,0)||1;
+              const avalColor = {"normal":"#2e7d32","alto":"#f39c12","muito_alto":"#e74c3c"};
+
+              // Barras de categoria
+              const bars = sumByCat.map(c=>`
+                <tr>
+                  <td style="padding:8px 12px;font-size:13px">${c.categoria}</td>
+                  <td style="padding:8px 12px;font-size:13px;font-weight:600">R$ ${c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td>
+                  <td style="padding:8px 12px;font-size:12px">${c.percentual?.toFixed(1)}%</td>
+                  <td style="padding:8px 12px">
+                    <span style="background:${avalColor[c.avaliacao]||"#888"};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px">${c.avaliacao||""}</span>
+                  </td>
+                  <td style="padding:8px 12px;font-size:11px;color:#555;max-width:200px">${c.detalhe||""}</td>
+                </tr>`).join("");
+
+              // Donut SVG
+              let cumAngle = -Math.PI/2; const r=70,cx=90,cy=90;
+              const colors = ["#c9a84c","#3498db","#e74c3c","#2ecc71","#9b59b6","#e67e22","#1abc9c","#f1c40f"];
+              const paths = sumByCat.map((c,i)=>{
+                const angle=(c.valor/totalDes)*2*Math.PI;
+                const x1=cx+r*Math.cos(cumAngle),y1=cy+r*Math.sin(cumAngle);
+                cumAngle+=angle;
+                const x2=cx+r*Math.cos(cumAngle),y2=cy+r*Math.sin(cumAngle);
+                return `<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${angle>Math.PI?1:0},1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${colors[i%colors.length]}" opacity="0.85"/>`;
+              }).join("");
+              const legend = sumByCat.map((c,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><div style="width:12px;height:12px;border-radius:3px;background:${colors[i%colors.length]}"></div><span style="font-size:12px">${c.categoria} — R$ ${c.valor?.toLocaleString("pt-BR",{minimumFractionDigits:2})}</span></div>`).join("");
+
+              // Oportunidades
+              const oportunidades = (analysis.oportunidades||[]).map(op=>`
+                <tr>
+                  <td style="padding:8px 12px;font-size:13px;font-weight:600">${op.categoria}</td>
+                  <td style="padding:8px 12px;font-size:12px;color:#444">${op.sugestao}</td>
+                  <td style="padding:8px 12px;font-size:14px;font-weight:700;color:#2e7d32">R$ ${op.economia_estimada?.toLocaleString("pt-BR",{minimumFractionDigits:2})}/mês</td>
+                </tr>`).join("");
+
+              const totalEcon = (analysis.oportunidades||[]).reduce((s,o)=>s+(o.economia_estimada||0),0);
+              const [ySel,mSel] = (selPeriods.sort()[0]||"").split("-");
+              const periodoLabel = [...selPeriods].sort().map(k=>{const[y,m]=k.split("-");return MONTH_NAMES[parseInt(m)-1]+"/"+y;}).join(" + ");
+
+              const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Análise Financeira — ${periodoLabel}</title>
+<style>
+  body{font-family:'Segoe UI',sans-serif;max-width:850px;margin:0 auto;padding:32px;background:#f8f9fa;color:#1a1a2e}
+  h1{font-family:Georgia,serif;font-size:28px;margin-bottom:4px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:#888;margin:28px 0 12px}
+  .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+  .kpi{background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+  .kpi .lbl{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+  .kpi .val{font-size:20px;font-family:Georgia,serif;font-weight:700}
+  table{width:100%;border-collapse:collapse}
+  th{background:#f1f3f5;padding:10px 12px;text-align:left;font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.5px}
+  tr:nth-child(even){background:#f9fafb}
+  .chart-row{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+  p{line-height:1.7;color:#333;font-size:14px}
+  @media print{body{padding:16px}.card{box-shadow:none}}
+</style>
+</head>
+<body>
+<h1>Análise Financeira Familiar</h1>
+<div style="color:#888;font-size:12px;margin-bottom:24px">Período: ${periodoLabel} · Gerado em ${new Date().toLocaleDateString("pt-BR")}</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="lbl">Receitas</div><div class="val" style="color:#2e7d32">R$ ${summary.totalReceitas.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div>
+  <div class="kpi"><div class="lbl">Despesas</div><div class="val" style="color:#c0392b">R$ ${summary.totalDespesas.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div>
+  <div class="kpi"><div class="lbl">Saldo</div><div class="val" style="color:${summary.saldo>=0?"#2e7d32":"#c0392b"}">R$ ${summary.saldo.toLocaleString("pt-BR",{minimumFractionDigits:2})}</div></div>
+  <div class="kpi"><div class="lbl">Taxa Poupança</div><div class="val" style="color:${analysis.taxa_poupanca_pct>=20?"#2e7d32":analysis.taxa_poupanca_pct>=10?"#f39c12":"#c0392b"}">${analysis.taxa_poupanca_pct?.toFixed(1)}%</div></div>
+</div>
+
+<div class="card"><h2>Panorama Geral</h2><p>${analysis.resumo}</p></div>
+<div class="card"><h2>Para Onde o Dinheiro Está Indo</h2><p>${analysis.para_onde_vai}</p></div>
+${analysis.padroes ? `<div class="card"><h2>Padrões Identificados</h2><p>${analysis.padroes}</p></div>` : ""}
+
+<div class="card">
+  <h2>Distribuição por Categoria</h2>
+  <div class="chart-row">
+    <svg width="180" height="180" viewBox="0 0 180 180">${paths}<circle cx="${cx}" cy="${cy}" r="35" fill="white"/></svg>
+    <div style="flex:1">${legend}</div>
+  </div>
+  <table style="margin-top:20px">
+    <thead><tr><th>Categoria</th><th>Valor</th><th>%</th><th>Avaliação</th><th>Detalhe</th></tr></thead>
+    <tbody>${bars}</tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Oportunidades de Economia</h2>
+  <table>
+    <thead><tr><th>Categoria</th><th>Sugestão</th><th>Economia Est.</th></tr></thead>
+    <tbody>${oportunidades}</tbody>
+    <tfoot><tr style="background:#e8f5e9"><td colspan="2" style="padding:10px 12px;font-weight:700">💰 Potencial total de economia/mês</td><td style="padding:10px 12px;font-weight:700;color:#2e7d32;font-size:16px">R$ ${totalEcon.toLocaleString("pt-BR",{minimumFractionDigits:2})}</td></tr></tfoot>
+  </table>
+</div>
+
+<div class="card"><h2>Avaliação de Poupança</h2><p>${analysis.avaliacao_poupanca}</p></div>
+
+<div style="text-align:center;margin-top:32px;font-size:11px;color:#bbb">Financeiro Fontanezzi · Análise gerada por IA com dados reais</div>
+</body></html>`;
+
+              const blob = new Blob([html], {type:"text/html"});
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `analise-financeira-${periodoLabel.replace(/\//g,"-").replace(/ \+ /g,"_")}.html`;
+              a.click(); URL.revokeObjectURL(url);
+            };
+
+            return (
             <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ display:"flex", justifyContent:"flex-end" }}>
+                <button onClick={exportAnalise} style={{ background:C.green, border:"none", color:"#fff", borderRadius:8, padding:"9px 16px", fontSize:12, fontWeight:600, fontFamily:"'DM Sans',sans-serif", cursor:"pointer" }}>
+                  📄 Exportar HTML
+                </button>
+              </div>
+
               <div style={{ background:C.surface, borderRadius:12, padding:16 }}>
                 <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Panorama Geral</div>
                 <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{analysis.resumo}</div>
@@ -1809,9 +1963,40 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
                 <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{analysis.para_onde_vai}</div>
               </div>
 
+              {analysis.padroes && (
+                <div style={{ background:C.surface, borderRadius:12, padding:16 }}>
+                  <div style={{ fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:1, fontFamily:"'DM Sans',sans-serif", marginBottom:6 }}>Padrões Identificados</div>
+                  <div style={{ fontSize:14, color:C.text, fontFamily:"'DM Sans',sans-serif", lineHeight:1.6 }}>{analysis.padroes}</div>
+                </div>
+              )}
+
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
                 <StatCard label="Taxa de Poupança" value={`${analysis.taxa_poupanca_pct?.toFixed(1)}%`} icon="📈" color={analysis.taxa_poupanca_pct>=20?C.green:analysis.taxa_poupanca_pct>=10?C.gold:C.red} sub={analysis.avaliacao_poupanca} />
               </div>
+
+              {analysis.top_categorias?.length > 0 && (
+                <div>
+                  <SectionTitle>Top Categorias de Gasto</SectionTitle>
+                  <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:10 }}>
+                    {analysis.top_categorias.map((c,i)=>{
+                      const avalColors = { normal:C.green, alto:C.gold, muito_alto:C.red };
+                      return (
+                        <div key={i} style={{ background:C.surface, borderRadius:12, padding:14 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                            <span style={{ fontSize:13, fontWeight:600, color:C.text, fontFamily:"'DM Sans',sans-serif" }}>{c.categoria}</span>
+                            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                              <span style={{ fontSize:11, background:(avalColors[c.avaliacao]||C.muted)+"22", color:(avalColors[c.avaliacao]||C.muted), borderRadius:6, padding:"2px 8px", fontFamily:"'DM Sans',sans-serif", textTransform:"capitalize" }}>{c.avaliacao?.replace("_"," ")||""}</span>
+                              <span style={{ fontSize:15, fontFamily:"'Cormorant Garamond',serif", fontWeight:700, color:C.text }}>{brl(c.valor)}</span>
+                              <span style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>{c.percentual?.toFixed(1)}%</span>
+                            </div>
+                          </div>
+                          {c.detalhe && <div style={{ fontSize:11, color:C.muted, fontFamily:"'DM Sans',sans-serif", lineHeight:1.5 }}>{c.detalhe}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <SectionTitle>Oportunidades de Economia</SectionTitle>
@@ -1838,7 +2023,8 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
         </Card>
       )}
 
