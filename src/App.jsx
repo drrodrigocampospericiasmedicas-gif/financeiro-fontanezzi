@@ -1150,33 +1150,43 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
   // ── Montar contexto financeiro completo para passar à IA ────────────────────
   const buildContext = () => {
     const allTxs = [
-      ...transactions.filter(t=>!t.internalTransfer).map(t=>({...t, origem:"conta"})),
-      ...cashTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"dinheiro"})),
-      ...cartaoTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"cartao"})),
+      ...transactions.filter(t=>!t.internalTransfer).map(t=>({...t, amount:parseFloat(t.amount), origem:"Conta corrente"})),
+      ...cashTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
+      ...cartaoTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
     ];
 
-    // Resumo por categoria (todas as datas)
-    const byCat = {};
+    // Agrupar por categoria + subcategoria com lançamentos individuais
+    const byCatSub = {};
     allTxs.filter(t=>t.amount<0).forEach(t=>{
-      const cat = t.category||"outros";
-      if (!byCat[cat]) byCat[cat] = { total:0, txs:[] };
-      byCat[cat].total += Math.abs(t.amount);
-      byCat[cat].txs.push({ date:t.date, desc:t.description, val:Math.abs(t.amount), origem:t.origem });
+      const cat    = t.category    || "outros";
+      const sub    = t.subcategory || "";
+      const catLbl = catOf(cat).label;
+      const key    = sub ? `${catLbl} › ${sub}` : catLbl;
+      if (!byCatSub[key]) byCatSub[key] = { total:0, txs:[] };
+      byCatSub[key].total += Math.abs(t.amount);
+      byCatSub[key].txs.push({ date:t.date, desc:t.description, val:Math.abs(t.amount), origem:t.origem });
     });
 
-    const catLines = Object.entries(byCat)
+    const catLines = Object.entries(byCatSub)
       .sort((a,b)=>b[1].total-a[1].total)
-      .map(([id,v])=>{
-        const label = catOf(id).label;
-        const top3 = v.txs.sort((a,b)=>b.val-a.val).slice(0,3).map(t=>`${t.date}:${t.desc}(${brl(t.val)})`).join(", ");
-        return `${label}: total R$${v.total.toFixed(2)}, ex: ${top3}`;
-      }).join("\n");
+      .map(([key,v])=>{
+        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,5)
+          .map(t=>`  - ${t.date} | ${t.desc} | R$${t.val.toFixed(2)} (${t.origem})`).join("\n");
+        return `[${key}] TOTAL: R$${v.total.toFixed(2)}\n${txList}`;
+      }).join("\n\n");
+
+    const recByCat = {};
+    allTxs.filter(t=>t.amount>0).forEach(t=>{
+      const lbl = catOf(t.category||"receita").label;
+      recByCat[lbl] = (recByCat[lbl]||0) + t.amount;
+    });
+    const recLines = Object.entries(recByCat).sort((a,b)=>b[1]-a[1])
+      .map(([lbl,v])=>`[${lbl}] R$${v.toFixed(2)}`).join(" | ");
 
     const totalRec = allTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
     const totalDes = allTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
     const patrimonio = accounts.reduce((s,a)=>s+(a.balance||0),0) + (parseFloat(cashBal)||0);
-
-    return { catLines, totalRec, totalDes, patrimonio };
+    return { catLines, recLines, totalRec, totalDes, patrimonio };
   };
 
   // ── Executar consulta ────────────────────────────────────────────────────────
@@ -1187,31 +1197,34 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
     try {
       const ctx = buildContext();
 
-      const prompt = `Você é um assistente financeiro pessoal para uma família brasileira (médico ortopedista e esposa). 
-Você tem acesso aos dados financeiros completos abaixo e deve responder ao comando do usuário de forma clara, detalhada e com dados reais.
+      const prompt = `Você é o assistente financeiro pessoal de uma família brasileira (médico ortopedista e esposa). Responda ao COMANDO DO USUÁRIO usando EXCLUSIVAMENTE os dados abaixo.
 
-DADOS FINANCEIROS DISPONÍVEIS:
-- Patrimônio total: R$ ${ctx.patrimonio.toFixed(2)}
-- Total receitas registradas: R$ ${ctx.totalRec.toFixed(2)}
-- Total despesas registradas: R$ ${ctx.totalDes.toFixed(2)}
+REGRAS OBRIGATÓRIAS:
+1. Use APENAS valores que existem nos dados. Nunca invente ou estime.
+2. Quando pedir análise de uma categoria (ex: "trabalho"), use SOMENTE os lançamentos dela.
+3. Quando pedir separação por subcategoria ("distinguindo cada item"), liste CADA subcategoria separadamente com valor exato.
+4. Não misture categorias diferentes a menos que pedido explicitamente.
+5. Cite descrições e valores reais dos lançamentos nos insights.
+6. Se uma categoria não tiver dados, diga claramente "sem lançamentos".
 
-GASTOS POR CATEGORIA (com exemplos de lançamentos):
+DADOS FINANCEIROS REAIS:
+Patrimônio total: R$${ctx.patrimonio.toFixed(2)}
+Receitas: R$${ctx.totalRec.toFixed(2)} — ${ctx.recLines}
+Despesas: R$${ctx.totalDes.toFixed(2)}
+
+DESPESAS DETALHADAS (Categoria › Subcategoria | lançamentos individuais):
 ${ctx.catLines}
 
-COMANDO DO USUÁRIO: "${query}"
+COMANDO: "${query}"
 
-Com base nos dados acima, execute o comando do usuário. Seja específico com os valores reais. Se o usuário pedir análise de categorias específicas, use os dados delas. Se pedir gráfico, inclua dados para geração.
-
-Retorne SOMENTE um JSON válido, sem markdown, no formato:
+Responda SOMENTE com JSON válido sem markdown:
 {
-  "titulo": "título curto da análise",
-  "resumo": "parágrafo resumo da análise (2-4 frases com valores reais)",
-  "insights": ["insight 1 com valores reais", "insight 2", "insight 3"],
-  "categorias_analisadas": [
-    {"label": "nome", "valor": numero, "cor": "#hexcolor", "percentual": numero}
-  ],
-  "recomendacoes": ["recomendação específica 1", "recomendação 2"],
-  "periodo": "descrição do período analisado"
+  "titulo": "título objetivo (máx 6 palavras)",
+  "periodo": "período dos dados",
+  "resumo": "2-3 frases com valores exatos dos dados",
+  "insights": ["frase com valor exato (ex: Gasolina: R$X = Y% do total Trabalho)", "insight 2", "insight 3"],
+  "categorias_analisadas": [{"label": "Categoria › Subcategoria ou só Categoria", "valor": numero_exato, "cor": "#hex", "percentual": numero}],
+  "recomendacoes": ["recomendação com valor real citado", "recomendação 2"]
 }`;
 
       const res = await fetch("https://besombpjuvqrcxtnstvk.supabase.co/functions/v1/bright-action", {
