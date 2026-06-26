@@ -4519,9 +4519,9 @@ const CartaoForm = ({ initial, onSave, onClose }) => {
 
 // ─── FORM LANÇAMENTO CARTÃO ───────────────────────────────────────────────────
 const CartaoTxForm = ({ cartoes, initial, onSave, onClose }) => {
-  const blank = { cartaoId:cartoes[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", notes:"" };
-  const [f, setF] = useState(initial ? {...initial, amount:String(Math.abs(initial.amount||""))} : blank);
-  const sf = (k,v) => setF(x=>({...x,[k]:v}));
+  const blank = { cartaoId:cartoes[0]?.id||"", date:fmt(TODAY), description:"", amount:"", category:"outros", subcategory:"", notes:"" };
+  const [f, setF] = useState(initial ? {...initial, amount:String(Math.abs(initial.amount||"")), subcategory:initial.subcategory||""} : blank);
+  const sf = (k,v) => setF(x=>({...x,[k]:v, ...(k==="category"?{subcategory:""}:{})}));
   const handleSave = () => {
     if (!f.description.trim() || !f.amount || !f.cartaoId) return;
     const amt = parseFloat(String(f.amount).replace(",","."));
@@ -4545,14 +4545,20 @@ const CartaoTxForm = ({ cartoes, initial, onSave, onClose }) => {
           </div>
           <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Descrição</div>
             <input style={IS} placeholder="Ex: Supermercado, Farmácia..." value={f.description} onChange={e=>sf("description",e.target.value)}/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Categoria</div>
-              <select style={IS} value={f.category} onChange={e=>sf("category",e.target.value)}>
-                {DEFAULT_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Categoria</div>
+            <select style={IS} value={f.category} onChange={e=>sf("category",e.target.value)}>
+              {DEFAULT_CATEGORIES.filter(c=>!["receita","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","trf","trt","pag_sjc","outras_receitas","transferencia"].includes(c.id))
+                .map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select></div>
+          {subOf(f.category).length > 0 && (
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Subcategoria</div>
+              <select style={IS} value={f.subcategory||""} onChange={e=>sf("subcategory",e.target.value)}>
+                <option value="">— Selecionar —</option>
+                {subOf(f.category).map(s=><option key={s} value={s}>{s}</option>)}
               </select></div>
-            <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Obs.</div>
-              <input style={IS} placeholder="Opcional..." value={f.notes||""} onChange={e=>sf("notes",e.target.value)}/></div>
-          </div>
+          )}
+          <div><div style={{fontSize:11,color:C.muted,marginBottom:4,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",letterSpacing:1}}>Obs.</div>
+            <input style={IS} placeholder="Opcional..." value={f.notes||""} onChange={e=>sf("notes",e.target.value)}/></div>
         </div>
         <div style={{display:"flex",gap:10,marginTop:22}}>
           <button onClick={handleSave} style={{flex:1,background:C.gold,color:C.bg,border:"none",borderRadius:10,padding:"13px",fontSize:14,fontWeight:600,fontFamily:"'DM Sans',sans-serif",cursor:"pointer"}}>Salvar</button>
@@ -5323,7 +5329,7 @@ Responda APENAS o objeto JSON:`
                   <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
                     {new Date(t.date+"T12:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})}
                     {cc && <> · <span style={{color:cc.cor}}>●</span> {cc.nome}</>}
-                    · <span style={{color:cat.color}}>{cat.label}</span>
+                    · <span style={{color:cat.color}}>{cat.label}{t.subcategory ? ` › ${t.subcategory}` : ""}</span>
                   </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
