@@ -1196,9 +1196,10 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
 
     const catLines = Object.entries(byCatSub)
       .sort((a,b)=>b[1].total-a[1].total)
+      .slice(0,20)
       .map(([key,v])=>{
-        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,5)
-          .map(t=>`  - ${t.date} | ${t.desc} | R$${t.val.toFixed(2)} (${t.origem})`).join("\n");
+        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,3)
+          .map(t=>`  - ${t.date} | ${t.desc} | R$${t.val.toFixed(2)}`).join("\n");
         return `[${key}] TOTAL: R$${v.total.toFixed(2)}\n${txList}`;
       }).join("\n\n");
 
@@ -1259,7 +1260,7 @@ Responda SOMENTE com JSON válido sem markdown:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 2000,
+          max_tokens: 4096,
           messages: [{ role: "user", content: prompt }]
         })
       });
@@ -1272,7 +1273,10 @@ Responda SOMENTE com JSON válido sem markdown:
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
       const parsed = safeParseAI(text);
-      if (!parsed) throw new Error("Resposta da IA não pôde ser interpretada. Tente novamente.");
+      if (!parsed) {
+        console.error("[ConsultaIA] texto bruto:", text.slice(0,500));
+        throw new Error("Resposta da IA não pôde ser interpretada (texto: " + text.slice(0,120) + "...)");
+      }
       setResult(parsed);
     } catch(e) {
       setError("Erro: " + (e.message || e));
@@ -1705,7 +1709,7 @@ Retorne SOMENTE JSON válido sem markdown:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 2000,
+          max_tokens: 4096,
           messages: [{ role: "user", content: prompt }]
         })
       });
