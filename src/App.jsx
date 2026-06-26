@@ -3908,7 +3908,7 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
   };
 
   // Subtotals
-  const subOf = (arr) => arr.reduce((s, a) => s + a.balance, 0);
+  const sumOf = (arr) => arr.reduce((s, a) => s + a.balance, 0);
   const correntes = accounts.filter(a => a.type !== "investimento");
   const investimentos = accounts.filter(a => a.type === "investimento");
 
@@ -3973,13 +3973,13 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
             {correntes.length > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>Subtotal contas correntes</span>
-                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.soft }}>{brl(subOf(correntes))}</span>
+                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.soft }}>{brl(sumOf(correntes))}</span>
               </div>
             )}
             {investimentos.length > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 12, color: C.muted, fontFamily: "'DM Sans',sans-serif" }}>Subtotal investimentos</span>
-                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.blue }}>{brl(subOf(investimentos))}</span>
+                <span style={{ fontSize: 14, fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: C.blue }}>{brl(sumOf(investimentos))}</span>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, borderTop: `1px solid ${C.border}` }}>
