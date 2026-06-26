@@ -156,26 +156,17 @@ const subOf = (catId) => SUBCATEGORIES[catId] || [];
 // ── Parse robusto de JSON da IA — tenta corrigir JSON malformado ─────────────
 function safeParseAI(text) {
   if (!text) return null;
-  // 1. Tentar extrair bloco JSON e parsear direto
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try { return JSON.parse(match[0]); } catch (_) {}
-  // 2. Tentar reparar: trocar quebras de linha dentro de strings por espaço
   try {
-    const repaired = match[0]
-      .replace(/:\s*"([^"]*?)"/gs, (m, val) =>
-        ': "' + val.replace(/[\n\r\t]/g, ' ').replace(/"/g, '\'') + '"')
-      .replace(/,\s*([}\]])/g, '$1'); // trailing commas
-    return JSON.parse(repaired);
-  } catch (_) {}
-  // 3. Tentar eval como último recurso (controlado)
-  try {
-    // eslint-disable-next-line no-new-func
-    return Function('"use strict"; return (' + match[0] + ')')();
+    let s = match[0]
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/[\n\r\t]/g, ' ');
+    return JSON.parse(s);
   } catch (_) {}
   return null;
 }
-
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 let _sbUrl = null, _sbKey = null;
 
@@ -3762,7 +3753,7 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
   const [cashTxs, setCashTxs] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editCash, setEditCash] = useState(null);
-  const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" });
+  const [form, setForm] = useState({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", subcategory: "", notes: "", owner: "rodrigo" });
   const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   // Load cash transactions from Supabase, fallback to localStorage
@@ -3811,7 +3802,7 @@ const Carteira = ({ accounts, onCashChange, transactions=[] }) => {
   const saldoAnteriorTotal = grandTotal - ((allRec + cashRec) - (allDes + cashDes));
 
 
-  const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
+  const openNew = () => { setForm({ date: fmt(TODAY), description: "", amount: "", type: "saida", category: "outros", subcategory: "", notes: "", owner: "rodrigo" }); setEditCash(null); setShowForm(true); };
   const openEdit = (tx) => { setEditCash(tx); setForm({ ...tx, type: parseFloat(tx.amount) >= 0 ? "entrada" : "saida", amount: Math.abs(parseFloat(tx.amount)).toString(), owner: tx.owner || "rodrigo" }); setShowForm(true); };
 
   // ── Ajustar saldo de dinheiro diretamente (sem criar lançamento manual) ─────
