@@ -81,6 +81,7 @@ const DEFAULT_CATEGORIES = [
   { id: "pagamento_cartao", label: "Pagamento de Cartão", icon: "🔁", color: "#95a5a6" },
   { id: "empregada",     label: "Empregada",     icon: "🧹",  color: "#8e44ad" },
   { id: "bela",          label: "Bela",          icon: "🐶",  color: "#fd79a8" },
+  { id: "beleza",        label: "Beleza",        icon: "💇",  color: "#e91e8c" },
   { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
   { id: "divida",        label: "Dívida",        icon: "📋",  color: "#e17055" },
   { id: "taxas",         label: "Taxas Bancárias",icon: "🏛️", color: "#636e72" },
@@ -146,6 +147,7 @@ const SUBCATEGORIES = {
   // Casa e pessoas
   empregada:     ["Salário","FGTS","Vale Transporte","Vale Alimentação","Outros"],
   bela:          ["Ração","Veterinário","Banho/Tosa","Petiscos","Remédio","Outros"],
+  beleza:        ["Rodrigo","Cláudia","Daniel","Outros"],
 };
 
 const subOf = (catId) => SUBCATEGORIES[catId] || [];
