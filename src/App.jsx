@@ -150,6 +150,30 @@ const SUBCATEGORIES = {
 
 const subOf = (catId) => SUBCATEGORIES[catId] || [];
 
+
+// ── Parse robusto de JSON da IA — tenta corrigir JSON malformado ─────────────
+function safeParseAI(text) {
+  if (!text) return null;
+  // 1. Tentar extrair bloco JSON e parsear direto
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch (_) {}
+  // 2. Tentar reparar: trocar quebras de linha dentro de strings por espaço
+  try {
+    const repaired = match[0]
+      .replace(/:\s*"([^"]*?)"/gs, (m, val) =>
+        ': "' + val.replace(/[\n\r\t]/g, ' ').replace(/"/g, '\'') + '"')
+      .replace(/,\s*([}\]])/g, '$1'); // trailing commas
+    return JSON.parse(repaired);
+  } catch (_) {}
+  // 3. Tentar eval como último recurso (controlado)
+  try {
+    // eslint-disable-next-line no-new-func
+    return Function('"use strict"; return (' + match[0] + ')')();
+  } catch (_) {}
+  return null;
+}
+
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
 let _sbUrl = null, _sbKey = null;
 
@@ -1247,9 +1271,8 @@ Responda SOMENTE com JSON válido sem markdown:
 
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Resposta inesperada da IA");
-      const parsed = JSON.parse(match[0]);
+      const parsed = safeParseAI(text);
+      if (!parsed) throw new Error("Resposta da IA não pôde ser interpretada. Tente novamente.");
       setResult(parsed);
     } catch(e) {
       setError("Erro: " + (e.message || e));
@@ -1693,9 +1716,8 @@ Retorne SOMENTE JSON válido sem markdown:
       }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Resposta da IA em formato inesperado");
-      const parsed = JSON.parse(match[0]);
+      const parsed = safeParseAI(text);
+      if (!parsed) throw new Error("Resposta da IA não pôde ser interpretada. Tente novamente.");
       setAnalysis(parsed);
     } catch (e) {
       console.error(e);
@@ -1752,9 +1774,8 @@ Retorne SOMENTE um objeto JSON, sem markdown, no formato:
       }
       const data = await res.json();
       const text = data.content?.[0]?.text || "";
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Resposta da IA em formato inesperado");
-      const parsed = JSON.parse(match[0]);
+      const parsed = safeParseAI(text);
+      if (!parsed) throw new Error("Resposta da IA não pôde ser interpretada. Tente novamente.");
       setInvestAnalysis(parsed);
     } catch (e) {
       console.error(e);
