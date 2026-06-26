@@ -1149,6 +1149,9 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
 
   // ── Montar contexto financeiro completo para passar à IA ────────────────────
   const buildContext = () => {
+    // Sanitizar texto removendo caracteres que quebram JSON
+    const san = (s) => String(s||"").replace(/"/g,"").replace(/[\n\r\t]/g," ").replace(/\s+/g," ").trim();
+
     const allTxs = [
       ...transactions.filter(t=>!t.internalTransfer).map(t=>({...t, amount:parseFloat(t.amount), origem:"Conta corrente"})),
       ...cashTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
@@ -1161,10 +1164,10 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
       const cat    = t.category    || "outros";
       const sub    = t.subcategory || "";
       const catLbl = catOf(cat).label;
-      const key    = sub ? `${catLbl} › ${sub}` : catLbl;
+      const key    = sub ? `${catLbl} > ${sub}` : catLbl;
       if (!byCatSub[key]) byCatSub[key] = { total:0, txs:[] };
       byCatSub[key].total += Math.abs(t.amount);
-      byCatSub[key].txs.push({ date:t.date, desc:t.description, val:Math.abs(t.amount), origem:t.origem });
+      byCatSub[key].txs.push({ date:t.date, desc:san(t.description), val:Math.abs(t.amount), origem:t.origem });
     });
 
     const catLines = Object.entries(byCatSub)
@@ -1541,6 +1544,8 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
 
   // ── Montar resumo financeiro do período para a IA ────────────────────────────
   const buildFinancialSummary = (periodKeys) => {
+    const san = (s) => String(s||"").replace(/"/g,"").replace(/[\n\r\t]/g," ").replace(/\s+/g," ").trim();
+
     const keys = Array.isArray(periodKeys) ? periodKeys : [periodKeys];
     const inPeriod = (date) => keys.some(k => date.startsWith(k));
 
@@ -1558,7 +1563,7 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
       const catLbl = catOf(cat).label;
       if (!byCatSub[cat]) byCatSub[cat] = { label:catLbl, color:catOf(cat).color, total:0, subs:{}, txs:[] };
       byCatSub[cat].total += val;
-      byCatSub[cat].txs.push({ date:t.date, desc:t.description, val, sub, origem:t.origem||"" });
+      byCatSub[cat].txs.push({ date:t.date, desc:san(t.description||""), val, sub, origem:t.origem||"" });
       if (sub) {
         if (!byCatSub[cat].subs[sub]) byCatSub[cat].subs[sub] = 0;
         byCatSub[cat].subs[sub] += val;
@@ -1599,7 +1604,7 @@ const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }
       ...cashDes.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
       ...cardTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
     ].sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)).slice(0,15);
-    const topTxs = allTxsList.map(t=>`${t.date} | ${t.description}${t.subcategory?" ("+t.subcategory+")":""} | R$${Math.abs(t.amount).toFixed(2)} | ${catOf(t.category).label} | ${t.origem}`).join("\n");
+    const topTxs = allTxsList.map(t=>`${t.date} | ${san(t.description)}${t.subcategory?" ("+t.subcategory+")":""} | R$${Math.abs(t.amount).toFixed(2)} | ${catOf(t.category).label} | ${t.origem}`).join("\n");
 
     // Dados para gráfico (retornamos também o byCatSub para exportação)
     return {
