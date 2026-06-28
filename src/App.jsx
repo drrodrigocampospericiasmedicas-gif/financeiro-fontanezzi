@@ -2160,31 +2160,38 @@ const Relatorios = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] 
     ? selMonths.sort().map(k => MONTH_NAMES[parseInt(k.split("-")[1])-1]+"/"+k.split("-")[0].slice(2)).join(" + ")
     : null;
 
-  // Build monthly summaries for selected year
+  // Build monthly summaries for selected year (conta + dinheiro)
   const months = Array.from({length:12},(_,i)=>{
     const m = String(i+1).padStart(2,"0");
     const key = `${year}-${m}`;
     const mTxs = transactions.filter(t=>t.date.startsWith(key)&&!t.internalTransfer);
-    const rec  = mTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
-    const des  = mTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
+    const mCashTxs = cashTxs.filter(t=>t.date.startsWith(key));
+    const rec  = mTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0)
+               + mCashTxs.filter(t=>parseFloat(t.amount)>0).reduce((s,t)=>s+parseFloat(t.amount),0);
+    const des  = mTxs.filter(t=>t.amount<0&&t.category!=="pagamento_cartao").reduce((s,t)=>s+Math.abs(t.amount),0)
+               + mCashTxs.filter(t=>parseFloat(t.amount)<0).reduce((s,t)=>s+Math.abs(parseFloat(t.amount)),0);
     const sal  = rec-des;
-    return { key, label:new Date(parseInt(year),i,1).toLocaleDateString("pt-BR",{month:"short"}), rec, des, sal, txs:mTxs };
+    return { key, label:new Date(parseInt(year),i,1).toLocaleDateString("pt-BR",{month:"short"}), rec, des, sal, txs:[...mTxs,...mCashTxs] };
   });
 
   const availMonths = months.filter(m=>m.txs.length>0);
   const labels = months.map(m=>m.label);
 
-  // Category breakdown — all year
-  const yearTxs = transactions.filter(t=>t.date.startsWith(year)&&t.amount<0&&!t.internalTransfer);
+  // Category breakdown — all year (conta + dinheiro)
+  const yearTxs = transactions.filter(t=>t.date.startsWith(year)&&t.amount<0&&!t.internalTransfer&&t.category!=="pagamento_cartao");
+  const yearCashDesTxs = cashTxs.filter(t=>t.date.startsWith(year)&&parseFloat(t.amount)<0);
   const byCat = {};
   yearTxs.forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+Math.abs(t.amount); });
+  yearCashDesTxs.forEach(t=>{ byCat[t.category||"outros"]=(byCat[t.category||"outros"]||0)+Math.abs(parseFloat(t.amount)); });
   const catSlices = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
   const catTotal = catSlices.reduce((s,c)=>s+c.value,0)||1;
 
   // Receitas por categoria — all year
   const yearRecTxs = transactions.filter(t=>t.date.startsWith(year)&&t.amount>0&&!t.internalTransfer);
+  const yearCashRecTxs = cashTxs.filter(t=>t.date.startsWith(year)&&parseFloat(t.amount)>0);
   const byCatRec = {};
   yearRecTxs.forEach(t=>{ byCatRec[t.category]=(byCatRec[t.category]||0)+t.amount; });
+  yearCashRecTxs.forEach(t=>{ byCatRec[t.category||"receita"]=(byCatRec[t.category||"receita"]||0)+parseFloat(t.amount); });
   const catSlicesRec = Object.entries(byCatRec).sort((a,b)=>b[1]-a[1]).map(([id,val])=>({ label:catOf(id).label, value:val, color:catOf(id).color, icon:catOf(id).icon, id }));
   const catTotalRec = catSlicesRec.reduce((s,c)=>s+c.value,0)||1;
 
