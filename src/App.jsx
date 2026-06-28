@@ -83,6 +83,7 @@ const DEFAULT_CATEGORIES = [
   { id: "bela",          label: "Bela",          icon: "🐶",  color: "#fd79a8" },
   { id: "beleza",        label: "Beleza",        icon: "💇",  color: "#e91e8c" },
   { id: "trabalho",      label: "Trabalho",      icon: "💼",  color: "#0984e3" },
+  { id: "clinica_quatis", label: "Clínica Quatis", icon: "🏥", color: "#00897b" },
   { id: "divida",        label: "Dívida",        icon: "📋",  color: "#e17055" },
   { id: "taxas",         label: "Taxas Bancárias",icon: "🏛️", color: "#636e72" },
   { id: "transferencia", label: "Transferência", icon: "🔄",  color: "#6b6f7d" },
