@@ -1538,6 +1538,314 @@ Responda SOMENTE com JSON válido sem markdown:
 };
 
 
+// ─── PREVISÕES FINANCEIRAS ────────────────────────────────────────────────────
+const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cashTxs=[] }) => {
+  const today = new Date();
+  const year  = today.getFullYear();
+  const month = today.getMonth(); // 0-indexed
+  const dayOfMonth  = today.getDate();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const daysLeft    = daysInMonth - dayOfMonth;
+  const monthKey    = `${year}-${String(month+1).padStart(2,"0")}`;
+  const [mesesHistorico, setMesesHistorico] = useState(3); // quantos meses usar para média
+
+  // ── Todas as transações (conta + dinheiro + cartão) ──────────────────────────
+  const allTxs = (date, minAmt) => {
+    const check = (t) => t.date.startsWith(date) && parseFloat(t.amount) < 0;
+    return [
+      ...transactions.filter(t=>check(t)&&!t.internalTransfer&&t.category!=="pagamento_cartao").map(t=>({...t,amount:parseFloat(t.amount)})),
+      ...cashTxs.filter(check).map(t=>({...t,amount:parseFloat(t.amount)})),
+      ...cartaoTxs.filter(check).map(t=>({...t,amount:parseFloat(t.amount)})),
+    ];
+  };
+
+  const allRecTxs = (date) => [
+    ...transactions.filter(t=>t.date.startsWith(date)&&parseFloat(t.amount)>0&&!t.internalTransfer).map(t=>({...t,amount:parseFloat(t.amount)})),
+    ...cashTxs.filter(t=>t.date.startsWith(date)&&parseFloat(t.amount)>0).map(t=>({...t,amount:parseFloat(t.amount)})),
+  ];
+
+  // ── MÊS ATUAL ────────────────────────────────────────────────────────────────
+  const currentDes = allTxs(monthKey).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const currentRec = allRecTxs(monthKey).reduce((s,t)=>s+t.amount,0);
+
+  // Projeção linear: gasto_diário × dias_no_mês
+  const gastoDiario   = dayOfMonth > 0 ? currentDes / dayOfMonth : 0;
+  const recDiaria     = dayOfMonth > 0 ? currentRec / dayOfMonth : 0;
+  const projecaoDes   = gastoDiario * daysInMonth;
+  const projecaoRec   = recDiaria * daysInMonth;
+  const projecaoSaldo = projecaoRec - projecaoDes;
+
+  // ── MÉDIAS HISTÓRICAS POR CATEGORIA (últimos N meses, excluindo mês atual) ──
+  const historicMonths = Array.from({length:mesesHistorico},(_,i)=>{
+    const d = new Date(year, month-1-i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  });
+
+  const mediaByCat = {};
+  historicMonths.forEach(mk=>{
+    const txs = allTxs(mk);
+    txs.forEach(t=>{
+      const cat = t.category||"outros";
+      if (!mediaByCat[cat]) mediaByCat[cat] = { total:0, meses:0 };
+      mediaByCat[cat].total += Math.abs(t.amount);
+    });
+  });
+  // Calcular média mensal por categoria
+  Object.keys(mediaByCat).forEach(cat=>{
+    mediaByCat[cat].media = mediaByCat[cat].total / mesesHistorico;
+  });
+
+  // Gasto atual por categoria no mês corrente
+  const currentByCat = {};
+  allTxs(monthKey).forEach(t=>{
+    const cat = t.category||"outros";
+    currentByCat[cat] = (currentByCat[cat]||0) + Math.abs(t.amount);
+  });
+
+  // Projeção por categoria (linear)
+  const projecaoByCat = {};
+  Object.keys(currentByCat).forEach(cat=>{
+    projecaoByCat[cat] = (currentByCat[cat] / dayOfMonth) * daysInMonth;
+  });
+
+  // Categorias com alertas (projeção > média * 1.2)
+  const alertas = Object.entries(projecaoByCat)
+    .filter(([cat, proj]) => {
+      const media = mediaByCat[cat]?.media || 0;
+      return media > 0 && proj > media * 1.15;
+    })
+    .sort((a,b)=> {
+      const pctA = (projecaoByCat[a[0]] / (mediaByCat[a[0]]?.media||1)) - 1;
+      const pctB = (projecaoByCat[b[0]] / (mediaByCat[b[0]]?.media||1)) - 1;
+      return pctB - pctA;
+    })
+    .map(([cat, proj])=>({
+      cat, proj,
+      media: mediaByCat[cat]?.media||0,
+      atual: currentByCat[cat]||0,
+      pct: Math.round(((proj/(mediaByCat[cat]?.media||1))-1)*100),
+      label: catOf(cat).label,
+      icon: catOf(cat).icon,
+      color: catOf(cat).color,
+    }));
+
+  // Categorias dentro da média (boas notícias)
+  const dentroMedia = Object.entries(currentByCat)
+    .filter(([cat])=> mediaByCat[cat]?.media > 0)
+    .filter(([cat, val])=> {
+      const proj = projecaoByCat[cat];
+      return proj <= mediaByCat[cat]?.media * 1.15;
+    })
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0,4)
+    .map(([cat, val])=>({
+      cat, val,
+      media: mediaByCat[cat]?.media||0,
+      proj: projecaoByCat[cat]||0,
+      label: catOf(cat).label,
+      icon: catOf(cat).icon,
+      color: catOf(cat).color,
+    }));
+
+  // ── RECEITAS RECORRENTES ──────────────────────────────────────────────────────
+  const recurrentesCats = ["trt","trf","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","pag_sjc","clinica_quatis","outras_receitas"];
+  const recHistory = {};
+  historicMonths.forEach(mk=>{
+    allRecTxs(mk).forEach(t=>{
+      const cat = t.category||"receita";
+      if (!recHistory[cat]) recHistory[cat] = [];
+      recHistory[cat].push(t.amount);
+    });
+  });
+
+  const recPrevisao = Object.entries(recHistory)
+    .map(([cat, vals])=>({
+      cat,
+      label: catOf(cat).label,
+      icon: catOf(cat).icon,
+      media: vals.reduce((s,v)=>s+v,0)/vals.length,
+      meses: vals.length,
+      atual: allRecTxs(monthKey).filter(t=>t.category===cat).reduce((s,t)=>s+t.amount,0),
+    }))
+    .filter(r=>r.media>0)
+    .sort((a,b)=>b.media-a.media);
+
+  const totalRecPrevisto = recPrevisao.reduce((s,r)=>s+r.media,0);
+  const totalRecAtual = recPrevisao.reduce((s,r)=>s+r.atual,0);
+
+  const MONTH_PT = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+
+  // ── Barras de progresso ───────────────────────────────────────────────────────
+  const ProgressBar = ({value, max, color="#c9a84c"}) => {
+    const pct = Math.min((value/max)*100, 100);
+    return (
+      <div style={{height:6,background:C.border,borderRadius:4,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:4,transition:"width .5s"}}/>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:18}}>
+
+      {/* ── Seletor de histórico ── */}
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Base histórica:</span>
+        {[2,3,6].map(n=>(
+          <button key={n} onClick={()=>setMesesHistorico(n)} style={{
+            padding:"5px 14px",borderRadius:20,fontSize:12,fontWeight:mesesHistorico===n?700:400,
+            fontFamily:"'DM Sans',sans-serif",cursor:"pointer",
+            background:mesesHistorico===n?C.gold+"22":"transparent",
+            border:`1px solid ${mesesHistorico===n?C.gold:C.border}`,
+            color:mesesHistorico===n?C.goldLight:C.muted
+          }}>{n} meses</button>
+        ))}
+      </div>
+
+      {/* ── Projeção do mês atual ── */}
+      <Card>
+        <SectionTitle>📅 Projeção do mês — {MONTH_NAMES[month]}/{year}</SectionTitle>
+        <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:16}}>
+          Baseado nos {dayOfMonth} dias decorridos. Restam {daysLeft} dias no mês.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:16}}>
+          <StatCard label="Gastos até agora"   value={brl(currentDes)} icon="💸" color={C.red}    sub={`R$${gastoDiario.toFixed(0)}/dia`}/>
+          <StatCard label="Projeção de gastos" value={brl(projecaoDes)} icon="📈" color={projecaoDes>projecaoRec?C.red:C.gold} sub="até o fim do mês"/>
+          <StatCard label="Receitas até agora" value={brl(currentRec)} icon="💰" color={C.green}  sub={`R$${recDiaria.toFixed(0)}/dia`}/>
+          <StatCard label="Saldo projetado"    value={brl(projecaoSaldo)} icon="⚖️" color={projecaoSaldo>=0?C.green:C.red} sub="estimativa"/>
+        </div>
+        <div style={{background:C.surface,borderRadius:12,padding:"12px 16px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:12,color:C.soft,fontFamily:"'DM Sans',sans-serif"}}>Progresso do mês</span>
+            <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>{dayOfMonth}/{daysInMonth} dias ({Math.round(dayOfMonth/daysInMonth*100)}%)</span>
+          </div>
+          <ProgressBar value={dayOfMonth} max={daysInMonth} color={C.gold}/>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
+            <span style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Gasto: {Math.round(currentDes/projecaoDes*100)}% da projeção</span>
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Alertas de desvio ── */}
+      {alertas.length > 0 && (
+        <Card>
+          <SectionTitle>⚠️ Categorias acima da média histórica</SectionTitle>
+          <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:14}}>
+            Projeção do mês atual vs média dos últimos {mesesHistorico} meses.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {alertas.map((a,i)=>(
+              <div key={i} style={{background:C.surface,borderRadius:12,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif",fontWeight:500}}>{a.icon} {a.label}</span>
+                  <span style={{fontSize:11,background:"#e74c3c22",color:"#e74c3c",borderRadius:6,padding:"2px 8px",fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>
+                    +{a.pct}% acima
+                  </span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Atual</div>
+                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.text}}>{brl(a.atual)}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Projeção</div>
+                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.red}}>{brl(a.proj)}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Média</div>
+                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.green}}>{brl(a.media)}</div>
+                  </div>
+                </div>
+                <ProgressBar value={a.proj} max={Math.max(a.proj,a.media)} color="#e74c3c"/>
+                <div style={{display:"flex",justifyContent:"flex-end",marginTop:4}}>
+                  <span style={{fontSize:10,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>
+                    excesso estimado: {brl(Math.max(0,a.proj-a.media))}/mês
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Categorias dentro da média ── */}
+      {dentroMedia.length > 0 && (
+        <Card>
+          <SectionTitle>✅ Categorias dentro da média</SectionTitle>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {dentroMedia.map((d,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,borderRadius:10,padding:"10px 14px"}}>
+                <div>
+                  <div style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif"}}>{d.icon} {d.label}</div>
+                  <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
+                    atual {brl(d.val)} · projeção {brl(d.proj)} · média {brl(d.media)}
+                  </div>
+                </div>
+                <span style={{fontSize:11,background:C.green+"22",color:C.green,borderRadius:6,padding:"2px 8px",fontFamily:"'DM Sans',sans-serif",fontWeight:600,flexShrink:0}}>
+                  {Math.round(d.proj/d.media*100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Previsão de receitas recorrentes ── */}
+      <Card>
+        <SectionTitle>💰 Previsão de receitas — {MONTH_NAMES[month]}/{year}</SectionTitle>
+        <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:14}}>
+          Baseado na média dos últimos {mesesHistorico} meses. Verde = já recebido este mês.
+        </div>
+        {recPrevisao.length === 0 ? (
+          <div style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>
+            Sem histórico de receitas nos últimos {mesesHistorico} meses.
+          </div>
+        ) : (
+          <>
+            <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+              {recPrevisao.map((r,i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,borderRadius:10,padding:"10px 14px"}}>
+                  <div>
+                    <div style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif"}}>{r.icon} {r.label}</div>
+                    <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
+                      média: {brl(r.media)} · recebido: {brl(r.atual)}
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:15,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:r.atual>=r.media*0.8?C.green:C.goldLight}}>
+                      {brl(r.media)}
+                    </div>
+                    {r.atual>0 && (
+                      <div style={{fontSize:10,color:C.green,fontFamily:"'DM Sans',sans-serif"}}>✓ recebido</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <StatCard label="Receita prevista" value={brl(totalRecPrevisto)} icon="📋" color={C.goldLight} sub="estimativa mensal"/>
+              <StatCard label="Já recebido" value={brl(totalRecAtual)} icon="✅" color={C.green} sub={`${Math.round(totalRecAtual/totalRecPrevisto*100)||0}% da previsão`}/>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* ── Resumo final ── */}
+      <Card>
+        <SectionTitle>📊 Resumo da previsão</SectionTitle>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <StatCard label="Receita prevista"  value={brl(totalRecPrevisto)} icon="📈" color={C.green}  sub="média histórica"/>
+          <StatCard label="Gasto projetado"   value={brl(projecaoDes)}      icon="📉" color={C.red}    sub="projeção linear"/>
+          <StatCard label="Saldo estimado"    value={brl(totalRecPrevisto-projecaoDes)} icon="⚖️" color={totalRecPrevisto-projecaoDes>=0?C.green:C.red} sub="receita - gasto"/>
+          <StatCard label="Taxa poupança est." value={`${totalRecPrevisto>0?Math.round((1-projecaoDes/totalRecPrevisto)*100):0}%`} icon="🎯" color={C.goldLight} sub="estimada"/>
+        </div>
+      </Card>
+
+    </div>
+  );
+};
+
+
 // ─── ANÁLISE IA & INVESTIMENTOS ─────────────────────────────────────────────────
 const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
   const [tab, setTab] = useState("gastos"); // gastos | investimentos
@@ -5827,6 +6135,7 @@ export default function App() {
     { id:"contas",      label:"Contas",       icon:"⬡"  },
     { id:"analise",     label:"Análise IA",   icon:"🤖" },
     { id:"consulta",     label:"Consulta IA",  icon:"🎙️" },
+    { id:"previsoes",    label:"Previsões",    icon:"📊" },
   ];
 
   const pageTitle = {
@@ -5834,7 +6143,8 @@ export default function App() {
     carteira:"Carteira", cartoes:"Cartões de Crédito", dividas:"Dívidas & Financiamentos",
     metas:"Metas", importar:"Importar Extrato", comprovantes:"Comprovantes", contas:"Contas",
     analise:"Análise IA & Investimentos",
-    consulta:"Consulta por IA"
+    consulta:"Consulta por IA",
+    previsoes:"Previsões Financeiras"
   };
 
   const bottomNav = [
@@ -5977,6 +6287,7 @@ export default function App() {
               {nav==="relatorios"   && <Relatorios   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="analise"      && <AnaliseIA    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="consulta"     && <ConsultaIA   transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
+              {nav==="previsoes"    && <Previsoes    transactions={transactions} accounts={accounts} cashBal={cashBal} cartaoTxs={cartaoTxs} cashTxs={cashTxsGlobal} />}
               {nav==="carteira"     && <Carteira     accounts={accounts} onCashChange={refreshCashBal} transactions={transactions} />}
               {nav==="cartoes"      && <Cartoes />}
               {nav==="dividas"      && <Dividas transactions={transactions} cashTxs={cashTxsGlobal} cartaoTxs={cartaoTxs} />}
