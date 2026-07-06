@@ -1540,155 +1540,127 @@ Responda SOMENTE com JSON válido sem markdown:
 
 // ─── PREVISÕES FINANCEIRAS ────────────────────────────────────────────────────
 const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cashTxs=[] }) => {
-  const today = new Date();
-  const year  = today.getFullYear();
-  const month = today.getMonth(); // 0-indexed
-  const dayOfMonth  = today.getDate();
+  const today      = new Date();
+  const year       = today.getFullYear();
+  const month      = today.getMonth(); // 0-indexed
+  const dayOfMonth = today.getDate();
   const daysInMonth = new Date(year, month+1, 0).getDate();
-  const daysLeft    = daysInMonth - dayOfMonth;
-  const monthKey    = `${year}-${String(month+1).padStart(2,"0")}`;
-  const [mesesHistorico, setMesesHistorico] = useState(3); // quantos meses usar para média
+  const daysLeft   = daysInMonth - dayOfMonth;
+  const pctMesPassado = dayOfMonth / daysInMonth; // fração do mês já decorrida
+  const monthKey   = `${year}-${String(month+1).padStart(2,"0")}`;
+  const [mesesHistorico, setMesesHistorico] = useState(3);
 
-  // ── Todas as transações (conta + dinheiro + cartão) ──────────────────────────
-  const allTxs = (date, minAmt) => {
-    const check = (t) => t.date.startsWith(date) && parseFloat(t.amount) < 0;
-    return [
-      ...transactions.filter(t=>check(t)&&!t.internalTransfer&&t.category!=="pagamento_cartao").map(t=>({...t,amount:parseFloat(t.amount)})),
-      ...cashTxs.filter(check).map(t=>({...t,amount:parseFloat(t.amount)})),
-      ...cartaoTxs.filter(check).map(t=>({...t,amount:parseFloat(t.amount)})),
-    ];
-  };
-
-  const allRecTxs = (date) => [
-    ...transactions.filter(t=>t.date.startsWith(date)&&parseFloat(t.amount)>0&&!t.internalTransfer).map(t=>({...t,amount:parseFloat(t.amount)})),
-    ...cashTxs.filter(t=>t.date.startsWith(date)&&parseFloat(t.amount)>0).map(t=>({...t,amount:parseFloat(t.amount)})),
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  const getDesTxs = (datePrefix) => [
+    ...transactions.filter(t=>t.date.startsWith(datePrefix)&&parseFloat(t.amount)<0&&!t.internalTransfer&&t.category!=="pagamento_cartao").map(t=>({...t,amount:parseFloat(t.amount)})),
+    ...cashTxs.filter(t=>t.date.startsWith(datePrefix)&&parseFloat(t.amount)<0).map(t=>({...t,amount:parseFloat(t.amount)})),
+    ...cartaoTxs.filter(t=>t.date.startsWith(datePrefix)&&parseFloat(t.amount)<0).map(t=>({...t,amount:parseFloat(t.amount)})),
+  ];
+  const getRecTxs = (datePrefix) => [
+    ...transactions.filter(t=>t.date.startsWith(datePrefix)&&parseFloat(t.amount)>0&&!t.internalTransfer).map(t=>({...t,amount:parseFloat(t.amount)})),
+    ...cashTxs.filter(t=>t.date.startsWith(datePrefix)&&parseFloat(t.amount)>0).map(t=>({...t,amount:parseFloat(t.amount)})),
   ];
 
-  // ── MÊS ATUAL ────────────────────────────────────────────────────────────────
-  const currentDes = allTxs(monthKey).reduce((s,t)=>s+Math.abs(t.amount),0);
-  const currentRec = allRecTxs(monthKey).reduce((s,t)=>s+t.amount,0);
-
-  // Projeção linear: gasto_diário × dias_no_mês
-  const gastoDiario   = dayOfMonth > 0 ? currentDes / dayOfMonth : 0;
-  const recDiaria     = dayOfMonth > 0 ? currentRec / dayOfMonth : 0;
-  const projecaoDes   = gastoDiario * daysInMonth;
-  const projecaoRec   = recDiaria * daysInMonth;
-  const projecaoSaldo = projecaoRec - projecaoDes;
-
-  // ── MÉDIAS HISTÓRICAS POR CATEGORIA (últimos N meses, excluindo mês atual) ──
+  // ── Histórico: últimos N meses completos ──────────────────────────────────────
   const historicMonths = Array.from({length:mesesHistorico},(_,i)=>{
     const d = new Date(year, month-1-i, 1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   });
 
+  // Média mensal total de gastos (histórico)
+  const mediaDesTotal = historicMonths.reduce((s,mk)=>
+    s + getDesTxs(mk).reduce((a,t)=>a+Math.abs(t.amount),0), 0) / mesesHistorico;
+  const mediaRecTotal = historicMonths.reduce((s,mk)=>
+    s + getRecTxs(mk).reduce((a,t)=>a+t.amount,0), 0) / mesesHistorico;
+
+  // Gasto e receita ATUAL no mês corrente
+  const currentDes = getDesTxs(monthKey).reduce((s,t)=>s+Math.abs(t.amount),0);
+  const currentRec = getRecTxs(monthKey).reduce((s,t)=>s+t.amount,0);
+
+  // Projeção = média histórica (base realista), ajustada pelo andamento atual
+  // Se já gastou mais que a proporção esperada do mês, aumenta a projeção
+  const ratioGasto = pctMesPassado > 0 ? (currentDes / mediaDesTotal) / pctMesPassado : 1;
+  const projecaoDes = mediaDesTotal * Math.min(ratioGasto, 2.0); // cap em 2x
+  const projecaoRec = mediaRecTotal;
+  const projecaoSaldo = projecaoRec - projecaoDes;
+
+  // ── Média e gasto atual por categoria ────────────────────────────────────────
   const mediaByCat = {};
   historicMonths.forEach(mk=>{
-    const txs = allTxs(mk);
-    txs.forEach(t=>{
+    getDesTxs(mk).forEach(t=>{
       const cat = t.category||"outros";
-      if (!mediaByCat[cat]) mediaByCat[cat] = { total:0, meses:0 };
-      mediaByCat[cat].total += Math.abs(t.amount);
+      if (!mediaByCat[cat]) mediaByCat[cat] = 0;
+      mediaByCat[cat] += Math.abs(t.amount);
     });
   });
-  // Calcular média mensal por categoria
-  Object.keys(mediaByCat).forEach(cat=>{
-    mediaByCat[cat].media = mediaByCat[cat].total / mesesHistorico;
-  });
+  Object.keys(mediaByCat).forEach(c=>{ mediaByCat[c] /= mesesHistorico; });
 
-  // Gasto atual por categoria no mês corrente
   const currentByCat = {};
-  allTxs(monthKey).forEach(t=>{
+  getDesTxs(monthKey).forEach(t=>{
     const cat = t.category||"outros";
     currentByCat[cat] = (currentByCat[cat]||0) + Math.abs(t.amount);
   });
 
-  // Projeção por categoria (linear)
-  const projecaoByCat = {};
-  Object.keys(currentByCat).forEach(cat=>{
-    projecaoByCat[cat] = (currentByCat[cat] / dayOfMonth) * daysInMonth;
-  });
-
-  // Categorias com alertas (projeção > média * 1.2)
-  const alertas = Object.entries(projecaoByCat)
-    .filter(([cat, proj]) => {
-      const media = mediaByCat[cat]?.media || 0;
-      return media > 0 && proj > media * 1.15;
+  // Alertas: gasto atual já > 90% da média, ou projetando ultrapassar
+  const alertas = Object.entries(currentByCat)
+    .filter(([cat, val])=>{
+      const media = mediaByCat[cat]||0;
+      if (media < 10) return false; // ignorar categorias insignificantes
+      const proporcaoEsperada = media * pctMesPassado;
+      return val > proporcaoEsperada * 1.3; // 30% acima do esperado para esta altura do mês
     })
-    .sort((a,b)=> {
-      const pctA = (projecaoByCat[a[0]] / (mediaByCat[a[0]]?.media||1)) - 1;
-      const pctB = (projecaoByCat[b[0]] / (mediaByCat[b[0]]?.media||1)) - 1;
-      return pctB - pctA;
+    .map(([cat, val])=>{
+      const media = mediaByCat[cat]||1;
+      const projecaoMes = pctMesPassado > 0 ? (val / pctMesPassado) : val;
+      return {
+        cat, val, media,
+        projecaoMes: Math.min(projecaoMes, media*3), // cap razoável
+        pct: Math.round((val/(media*pctMesPassado)-1)*100),
+        label: catOf(cat).label, icon: catOf(cat).icon, color: catOf(cat).color,
+      };
     })
-    .map(([cat, proj])=>({
-      cat, proj,
-      media: mediaByCat[cat]?.media||0,
-      atual: currentByCat[cat]||0,
-      pct: Math.round(((proj/(mediaByCat[cat]?.media||1))-1)*100),
-      label: catOf(cat).label,
-      icon: catOf(cat).icon,
-      color: catOf(cat).color,
-    }));
+    .sort((a,b)=>b.pct-a.pct)
+    .slice(0,6);
 
-  // Categorias dentro da média (boas notícias)
+  // Dentro da média
   const dentroMedia = Object.entries(currentByCat)
-    .filter(([cat])=> mediaByCat[cat]?.media > 0)
-    .filter(([cat, val])=> {
-      const proj = projecaoByCat[cat];
-      return proj <= mediaByCat[cat]?.media * 1.15;
+    .filter(([cat,val])=>{
+      const media = mediaByCat[cat]||0;
+      if (media < 10) return false;
+      return val <= media * pctMesPassado * 1.3;
     })
     .sort((a,b)=>b[1]-a[1])
     .slice(0,4)
-    .map(([cat, val])=>({
-      cat, val,
-      media: mediaByCat[cat]?.media||0,
-      proj: projecaoByCat[cat]||0,
-      label: catOf(cat).label,
-      icon: catOf(cat).icon,
-      color: catOf(cat).color,
-    }));
+    .map(([cat,val])=>({cat,val,media:mediaByCat[cat]||0,label:catOf(cat).label,icon:catOf(cat).icon}));
 
-  // ── RECEITAS RECORRENTES ──────────────────────────────────────────────────────
-  const recurrentesCats = ["trt","trf","salario_claudia","consulta_particular","planos_ortasso","fat_olade","laudos","pag_sjc","clinica_quatis","outras_receitas"];
+  // ── Receitas recorrentes ──────────────────────────────────────────────────────
   const recHistory = {};
   historicMonths.forEach(mk=>{
-    allRecTxs(mk).forEach(t=>{
+    getRecTxs(mk).forEach(t=>{
       const cat = t.category||"receita";
       if (!recHistory[cat]) recHistory[cat] = [];
       recHistory[cat].push(t.amount);
     });
   });
-
   const recPrevisao = Object.entries(recHistory)
-    .map(([cat, vals])=>({
-      cat,
-      label: catOf(cat).label,
-      icon: catOf(cat).icon,
+    .map(([cat,vals])=>({
+      cat, label:catOf(cat).label, icon:catOf(cat).icon,
       media: vals.reduce((s,v)=>s+v,0)/vals.length,
-      meses: vals.length,
-      atual: allRecTxs(monthKey).filter(t=>t.category===cat).reduce((s,t)=>s+t.amount,0),
+      atual: getRecTxs(monthKey).filter(t=>t.category===cat).reduce((s,t)=>s+t.amount,0),
     }))
     .filter(r=>r.media>0)
     .sort((a,b)=>b.media-a.media);
-
   const totalRecPrevisto = recPrevisao.reduce((s,r)=>s+r.media,0);
-  const totalRecAtual = recPrevisao.reduce((s,r)=>s+r.atual,0);
+  const totalRecAtual    = recPrevisao.reduce((s,r)=>s+r.atual,0);
 
-  const MONTH_PT = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
-
-  // ── Barras de progresso ───────────────────────────────────────────────────────
-  const ProgressBar = ({value, max, color="#c9a84c"}) => {
-    const pct = Math.min((value/max)*100, 100);
-    return (
-      <div style={{height:6,background:C.border,borderRadius:4,overflow:"hidden"}}>
-        <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:4,transition:"width .5s"}}/>
-      </div>
-    );
+  const ProgressBar = ({value,max,color="#c9a84c"}) => {
+    const pct = Math.min((value/Math.max(max,1))*100,100);
+    return (<div style={{height:6,background:C.border,borderRadius:4,overflow:"hidden"}}>
+      <div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:4,transition:"width .5s"}}/></div>);
   };
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:18}}>
-
-      {/* ── Seletor de histórico ── */}
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
         <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Base histórica:</span>
         {[2,3,6].map(n=>(
@@ -1702,36 +1674,45 @@ const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cash
         ))}
       </div>
 
-      {/* ── Projeção do mês atual ── */}
+      {/* ── Projeção do mês ── */}
       <Card>
         <SectionTitle>📅 Projeção do mês — {MONTH_NAMES[month]}/{year}</SectionTitle>
-        <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:16}}>
-          Baseado nos {dayOfMonth} dias decorridos. Restam {daysLeft} dias no mês.
+        <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:14}}>
+          {dayOfMonth}º dia de {daysInMonth}. Restam {daysLeft} dias.
+          Projeção baseada na <strong>média histórica de {mesesHistorico} meses</strong>, ajustada pelo ritmo atual.
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:16}}>
-          <StatCard label="Gastos até agora"   value={brl(currentDes)} icon="💸" color={C.red}    sub={`R$${gastoDiario.toFixed(0)}/dia`}/>
-          <StatCard label="Projeção de gastos" value={brl(projecaoDes)} icon="📈" color={projecaoDes>projecaoRec?C.red:C.gold} sub="até o fim do mês"/>
-          <StatCard label="Receitas até agora" value={brl(currentRec)} icon="💰" color={C.green}  sub={`R$${recDiaria.toFixed(0)}/dia`}/>
-          <StatCard label="Saldo projetado"    value={brl(projecaoSaldo)} icon="⚖️" color={projecaoSaldo>=0?C.green:C.red} sub="estimativa"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+          <StatCard label="Gasto até agora"   value={brl(currentDes)} icon="💸" color={C.red}
+            sub={`${Math.round(pctMesPassado*100)}% do mês decorrido`}/>
+          <StatCard label="Média histórica/mês" value={brl(mediaDesTotal)} icon="📊" color={C.muted}
+            sub={`base: ${mesesHistorico} meses`}/>
+          <StatCard label="Projeção de gastos" value={brl(projecaoDes)} icon="📈"
+            color={projecaoDes>mediaDesTotal*1.2?C.red:projecaoDes>mediaDesTotal?C.gold:C.green}
+            sub={projecaoDes>mediaDesTotal*1.2?"⚠️ acima da média":projecaoDes>mediaDesTotal?"levemente acima":"dentro da média"}/>
+          <StatCard label="Saldo projetado"   value={brl(projecaoSaldo)} icon="⚖️"
+            color={projecaoSaldo>=0?C.green:C.red} sub="receita prev. − gasto proj."/>
         </div>
         <div style={{background:C.surface,borderRadius:12,padding:"12px 16px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
             <span style={{fontSize:12,color:C.soft,fontFamily:"'DM Sans',sans-serif"}}>Progresso do mês</span>
-            <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>{dayOfMonth}/{daysInMonth} dias ({Math.round(dayOfMonth/daysInMonth*100)}%)</span>
+            <span style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>{dayOfMonth}/{daysInMonth} dias</span>
           </div>
           <ProgressBar value={dayOfMonth} max={daysInMonth} color={C.gold}/>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-            <span style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Gasto: {Math.round(currentDes/projecaoDes*100)}% da projeção</span>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+            <span style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>
+              Gasto: {brl(currentDes)} de {brl(mediaDesTotal)} esperados até aqui ({Math.round(pctMesPassado*100)}%)
+            </span>
           </div>
+          <ProgressBar value={currentDes} max={mediaDesTotal} color={currentDes>mediaDesTotal*pctMesPassado*1.3?C.red:C.green}/>
         </div>
       </Card>
 
-      {/* ── Alertas de desvio ── */}
+      {/* ── Alertas ── */}
       {alertas.length > 0 && (
         <Card>
-          <SectionTitle>⚠️ Categorias acima da média histórica</SectionTitle>
+          <SectionTitle>⚠️ Atenção — acima do esperado para este momento do mês</SectionTitle>
           <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:14}}>
-            Projeção do mês atual vs média dos últimos {mesesHistorico} meses.
+            Comparando o gasto atual com o esperado proporcionalmente ({Math.round(pctMesPassado*100)}% do mês).
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {alertas.map((a,i)=>(
@@ -1739,50 +1720,45 @@ const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cash
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                   <span style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif",fontWeight:500}}>{a.icon} {a.label}</span>
                   <span style={{fontSize:11,background:"#e74c3c22",color:"#e74c3c",borderRadius:6,padding:"2px 8px",fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>
-                    +{a.pct}% acima
+                    +{a.pct}% vs esperado
                   </span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
                   <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Atual</div>
-                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.text}}>{brl(a.atual)}</div>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Gasto atual</div>
+                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.red}}>{brl(a.val)}</div>
                   </div>
                   <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Projeção</div>
-                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.red}}>{brl(a.proj)}</div>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Esperado até hoje</div>
+                    <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.muted}}>{brl(a.media*pctMesPassado)}</div>
                   </div>
                   <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Média</div>
+                    <div style={{fontSize:9,color:C.muted,fontFamily:"'DM Sans',sans-serif",textTransform:"uppercase",marginBottom:2}}>Média mensal</div>
                     <div style={{fontSize:13,fontFamily:"'Cormorant Garamond',serif",fontWeight:600,color:C.green}}>{brl(a.media)}</div>
                   </div>
                 </div>
-                <ProgressBar value={a.proj} max={Math.max(a.proj,a.media)} color="#e74c3c"/>
-                <div style={{display:"flex",justifyContent:"flex-end",marginTop:4}}>
-                  <span style={{fontSize:10,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>
-                    excesso estimado: {brl(Math.max(0,a.proj-a.media))}/mês
-                  </span>
-                </div>
+                <ProgressBar value={a.val} max={a.media} color={a.val>a.media?"#e74c3c":"#f39c12"}/>
               </div>
             ))}
           </div>
         </Card>
       )}
 
-      {/* ── Categorias dentro da média ── */}
+      {/* ── Dentro da média ── */}
       {dentroMedia.length > 0 && (
         <Card>
-          <SectionTitle>✅ Categorias dentro da média</SectionTitle>
+          <SectionTitle>✅ Dentro do esperado</SectionTitle>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {dentroMedia.map((d,i)=>(
               <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,borderRadius:10,padding:"10px 14px"}}>
                 <div>
                   <div style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif"}}>{d.icon} {d.label}</div>
                   <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
-                    atual {brl(d.val)} · projeção {brl(d.proj)} · média {brl(d.media)}
+                    gasto {brl(d.val)} · esperado até hoje {brl(d.media*pctMesPassado)} · média mensal {brl(d.media)}
                   </div>
                 </div>
-                <span style={{fontSize:11,background:C.green+"22",color:C.green,borderRadius:6,padding:"2px 8px",fontFamily:"'DM Sans',sans-serif",fontWeight:600,flexShrink:0}}>
-                  {Math.round(d.proj/d.media*100)}%
+                <span style={{fontSize:11,background:C.green+"22",color:C.green,borderRadius:6,padding:"2px 8px",fontFamily:"'DM Sans',sans-serif",fontWeight:600,flexShrink:0,marginLeft:8}}>
+                  {Math.round(d.val/(d.media*pctMesPassado)*100)}%
                 </span>
               </div>
             ))}
@@ -1790,16 +1766,14 @@ const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cash
         </Card>
       )}
 
-      {/* ── Previsão de receitas recorrentes ── */}
+      {/* ── Receitas previstas ── */}
       <Card>
-        <SectionTitle>💰 Previsão de receitas — {MONTH_NAMES[month]}/{year}</SectionTitle>
+        <SectionTitle>💰 Receitas esperadas — {MONTH_NAMES[month]}/{year}</SectionTitle>
         <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginBottom:14}}>
-          Baseado na média dos últimos {mesesHistorico} meses. Verde = já recebido este mês.
+          Média histórica por fonte de receita. Verde = já recebido este mês.
         </div>
         {recPrevisao.length === 0 ? (
-          <div style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>
-            Sem histórico de receitas nos últimos {mesesHistorico} meses.
-          </div>
+          <div style={{fontSize:12,color:C.muted,fontFamily:"'DM Sans',sans-serif"}}>Sem histórico de receitas.</div>
         ) : (
           <>
             <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
@@ -1808,43 +1782,40 @@ const Previsoes = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cash
                   <div>
                     <div style={{fontSize:13,color:C.text,fontFamily:"'DM Sans',sans-serif"}}>{r.icon} {r.label}</div>
                     <div style={{fontSize:11,color:C.muted,fontFamily:"'DM Sans',sans-serif",marginTop:2}}>
-                      média: {brl(r.media)} · recebido: {brl(r.atual)}
+                      esperado: {brl(r.media)} · recebido: {brl(r.atual)}
                     </div>
+                    <ProgressBar value={r.atual} max={r.media} color={r.atual>=r.media*0.8?C.green:C.gold}/>
                   </div>
-                  <div style={{textAlign:"right",flexShrink:0}}>
-                    <div style={{fontSize:15,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:r.atual>=r.media*0.8?C.green:C.goldLight}}>
-                      {brl(r.media)}
-                    </div>
-                    {r.atual>0 && (
-                      <div style={{fontSize:10,color:C.green,fontFamily:"'DM Sans',sans-serif"}}>✓ recebido</div>
-                    )}
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                    <div style={{fontSize:15,fontFamily:"'Cormorant Garamond',serif",fontWeight:700,color:r.atual>=r.media*0.8?C.green:C.goldLight}}>{brl(r.media)}</div>
+                    {r.atual>0&&<div style={{fontSize:10,color:C.green,fontFamily:"'DM Sans',sans-serif"}}>✓ {Math.round(r.atual/r.media*100)}%</div>}
                   </div>
                 </div>
               ))}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <StatCard label="Receita prevista" value={brl(totalRecPrevisto)} icon="📋" color={C.goldLight} sub="estimativa mensal"/>
-              <StatCard label="Já recebido" value={brl(totalRecAtual)} icon="✅" color={C.green} sub={`${Math.round(totalRecAtual/totalRecPrevisto*100)||0}% da previsão`}/>
+              <StatCard label="Receita esperada/mês" value={brl(totalRecPrevisto)} icon="📋" color={C.goldLight} sub="média histórica"/>
+              <StatCard label="Já recebido" value={brl(totalRecAtual)} icon="✅" color={C.green} sub={`${Math.round(totalRecAtual/Math.max(totalRecPrevisto,1)*100)}% da previsão`}/>
             </div>
           </>
         )}
       </Card>
 
-      {/* ── Resumo final ── */}
+      {/* ── Resumo ── */}
       <Card>
-        <SectionTitle>📊 Resumo da previsão</SectionTitle>
+        <SectionTitle>📊 Resumo da previsão mensal</SectionTitle>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <StatCard label="Receita prevista"  value={brl(totalRecPrevisto)} icon="📈" color={C.green}  sub="média histórica"/>
-          <StatCard label="Gasto projetado"   value={brl(projecaoDes)}      icon="📉" color={C.red}    sub="projeção linear"/>
-          <StatCard label="Saldo estimado"    value={brl(totalRecPrevisto-projecaoDes)} icon="⚖️" color={totalRecPrevisto-projecaoDes>=0?C.green:C.red} sub="receita - gasto"/>
-          <StatCard label="Taxa poupança est." value={`${totalRecPrevisto>0?Math.round((1-projecaoDes/totalRecPrevisto)*100):0}%`} icon="🎯" color={C.goldLight} sub="estimada"/>
+          <StatCard label="Receita esperada"  value={brl(totalRecPrevisto||mediaRecTotal)} icon="📈" color={C.green}  sub="média histórica"/>
+          <StatCard label="Gasto projetado"   value={brl(projecaoDes)}  icon="📉" color={C.red}    sub="base histórica ajustada"/>
+          <StatCard label="Saldo estimado"    value={brl((totalRecPrevisto||mediaRecTotal)-projecaoDes)} icon="⚖️"
+            color={(totalRecPrevisto||mediaRecTotal)-projecaoDes>=0?C.green:C.red} sub="receita − gasto proj."/>
+          <StatCard label="Taxa poupança est." value={`${(totalRecPrevisto||mediaRecTotal)>0?Math.max(0,Math.round((1-projecaoDes/(totalRecPrevisto||mediaRecTotal))*100)):0}%`}
+            icon="🎯" color={C.goldLight} sub="estimada"/>
         </div>
       </Card>
-
     </div>
   );
 };
-
 
 // ─── ANÁLISE IA & INVESTIMENTOS ─────────────────────────────────────────────────
 const AnaliseIA = ({ transactions, accounts, cashBal, cartaoTxs=[], cashTxs=[] }) => {
