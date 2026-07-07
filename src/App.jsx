@@ -1138,6 +1138,7 @@ function exportCSV(transactions, accounts, period) {
 const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cashTxs=[] }) => {
   const [query, setQuery]         = useState("");
   const [loading, setLoading]     = useState(false);
+  const [filterPeriod, setFilterPeriod] = useState(""); // "" = todos, ou "YYYY-MM"
   const [result, setResult]       = useState(null);
   const [error, setError]         = useState("");
   const [listening, setListening] = useState(false);
@@ -1171,9 +1172,9 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
     const san = (s) => String(s||"").replace(/"/g,"").replace(/[\n\r\t]/g," ").replace(/\s+/g," ").trim();
 
     const allTxs = [
-      ...transactions.filter(t=>!t.internalTransfer).map(t=>({...t, amount:parseFloat(t.amount), origem:"Conta corrente"})),
-      ...cashTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
-      ...cartaoTxs.map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
+      ...transactions.filter(t=>!t.internalTransfer && (!filterPeriod || t.date.startsWith(filterPeriod))).map(t=>({...t, amount:parseFloat(t.amount), origem:"Conta corrente"})),
+      ...cashTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
+      ...cartaoTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
     ];
 
     // Agrupar por categoria + subcategoria com lançamentos individuais
@@ -1190,9 +1191,9 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
 
     const catLines = Object.entries(byCatSub)
       .sort((a,b)=>b[1].total-a[1].total)
-      .slice(0,20)
       .map(([key,v])=>{
-        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,8)
+        // Ordenar por data mais recente primeiro (não por valor) para mostrar dados atuais
+        const txList = v.txs.sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8)
           .map(t=>`  - ${t.date} | ${t.desc} | R$${t.val.toFixed(2)}`).join("\n");
         return `[${key}] TOTAL: R$${v.total.toFixed(2)} (${v.txs.length} lançamentos)\n${txList}`;
       }).join("\n\n");
@@ -1387,6 +1388,19 @@ Responda SOMENTE com JSON válido sem markdown:
         <SectionTitle>Consulta Financeira por IA</SectionTitle>
         <div style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif", marginBottom:18, lineHeight:1.6 }}>
           Faça uma pergunta ou peça uma análise em linguagem natural. Use o microfone ou digite. A IA consulta seus dados reais e gera um relatório exportável.
+        </div>
+
+        <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:12, flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:C.muted, fontFamily:"'DM Sans',sans-serif" }}>Período:</span>
+          <select style={{ ...IS, width:"auto", fontSize:12 }} value={filterPeriod} onChange={e=>{setFilterPeriod(e.target.value); setResult(null);}}>
+            <option value="">Todos os meses</option>
+            {Array.from({length:12},(_,i)=>{
+              const d = new Date(TODAY.getFullYear(), TODAY.getMonth()-i, 1);
+              const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+              return <option key={key} value={key}>{MONTH_NAMES[d.getMonth()]}/{d.getFullYear()}</option>;
+            })}
+          </select>
+          {filterPeriod && <span style={{ fontSize:11, color:C.gold, fontFamily:"'DM Sans',sans-serif" }}>Analisando apenas {filterPeriod}</span>}
         </div>
 
         {/* Campo de texto + microfone */}
