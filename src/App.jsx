@@ -1185,16 +1185,16 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
       const key    = sub ? `${catLbl} > ${sub}` : catLbl;
       if (!byCatSub[key]) byCatSub[key] = { total:0, txs:[] };
       byCatSub[key].total += Math.abs(t.amount);
-      byCatSub[key].txs.push({ date:t.date, desc:san(t.description), val:Math.abs(t.amount), origem:t.origem });
+      byCatSub[key].txs.push({ date:t.date, desc:san(t.description), val:Math.abs(t.amount), origem:t.origem, sub });
     });
 
     const catLines = Object.entries(byCatSub)
       .sort((a,b)=>b[1].total-a[1].total)
       .slice(0,20)
       .map(([key,v])=>{
-        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,3)
+        const txList = v.txs.sort((a,b)=>b.val-a.val).slice(0,8)
           .map(t=>`  - ${t.date} | ${t.desc} | R$${t.val.toFixed(2)}`).join("\n");
-        return `[${key}] TOTAL: R$${v.total.toFixed(2)}\n${txList}`;
+        return `[${key}] TOTAL: R$${v.total.toFixed(2)} (${v.txs.length} lançamentos)\n${txList}`;
       }).join("\n\n");
 
     const recByCat = {};
@@ -1224,10 +1224,11 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
 REGRAS OBRIGATÓRIAS:
 1. Use APENAS valores que existem nos dados. Nunca invente ou estime.
 2. Quando pedir análise de uma categoria (ex: "trabalho"), use SOMENTE os lançamentos dela.
-3. Quando pedir separação por subcategoria ("distinguindo cada item"), liste CADA subcategoria separadamente com valor exato.
-4. Não misture categorias diferentes a menos que pedido explicitamente.
-5. Cite descrições e valores reais dos lançamentos nos insights.
-6. Se uma categoria não tiver dados, diga claramente "sem lançamentos".
+3. Quando pedir separação por subcategoria, liste CADA subcategoria separadamente com valor exato.
+4. IMPORTANTE: lançamentos sem subcategoria aparecem agrupados pela categoria principal. Nesse caso, USE a descrição individual de cada lançamento para identificar o tipo (ex: "Gasolina" = combustível, "Pedagio" = pedágio). Some todos os lançamentos que se referem ao mesmo item pelo nome da descrição.
+5. Não misture categorias diferentes a menos que pedido explicitamente.
+6. Cite o número exato de lançamentos e o total de cada um.
+7. Se uma categoria não tiver dados, diga claramente "sem lançamentos".
 
 DADOS FINANCEIROS REAIS:
 Patrimônio total: R$${ctx.patrimonio.toFixed(2)}
