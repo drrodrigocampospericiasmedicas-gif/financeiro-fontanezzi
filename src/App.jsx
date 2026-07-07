@@ -1172,10 +1172,24 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
     const san = (s) => String(s||"").replace(/"/g,"").replace(/[\n\r\t]/g," ").replace(/\s+/g," ").trim();
 
     const allTxs = [
-      ...transactions.filter(t=>!t.internalTransfer && (!filterPeriod || t.date.startsWith(filterPeriod))).map(t=>({...t, amount:parseFloat(t.amount), origem:"Conta corrente"})),
-      ...cashTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>({...t, amount:parseFloat(t.amount), origem:"Dinheiro"})),
-      ...cartaoTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>({...t, amount:parseFloat(t.amount), origem:"Cartão"})),
+      ...transactions.filter(t=>!t.internalTransfer && (!filterPeriod || t.date.startsWith(filterPeriod))).map(t=>{
+        const acc = accounts.find(a=>a.id===t.accountId);
+        return {...t, amount:parseFloat(t.amount), origem: acc ? `${acc.name} (Conta)` : "Conta corrente"};
+      }),
+      ...cashTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>({...t, amount:parseFloat(t.amount), origem:"Carteira Dinheiro"})),
+      ...cartaoTxs.filter(t=>!filterPeriod || t.date.startsWith(filterPeriod)).map(t=>{
+        const cartao = (typeof cartoes !== "undefined" ? cartoes : []).find(c=>c.id===t.cartaoId);
+        return {...t, amount:parseFloat(t.amount), origem: cartao ? `Cartão ${cartao.nome}` : "Cartão de Crédito"};
+      }),
     ];
+
+    // Resumo por origem (conta/cartão/dinheiro)
+    const byOrigem = {};
+    allTxs.filter(t=>t.amount<0).forEach(t=>{
+      byOrigem[t.origem] = (byOrigem[t.origem]||0) + Math.abs(t.amount);
+    });
+    const origemLines = Object.entries(byOrigem).sort((a,b)=>b[1]-a[1])
+      .map(([orig,val])=>`${orig}: R$${val.toFixed(2)}`).join(" | ");
 
     // Agrupar por categoria + subcategoria com lançamentos individuais
     const byCatSub = {};
@@ -1209,7 +1223,7 @@ const ConsultaIA = ({ transactions=[], accounts=[], cashBal=0, cartaoTxs=[], cas
     const totalRec = allTxs.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0);
     const totalDes = allTxs.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0);
     const patrimonio = accounts.reduce((s,a)=>s+(a.balance||0),0) + (parseFloat(cashBal)||0);
-    return { catLines, recLines, totalRec, totalDes, patrimonio };
+    return { catLines, recLines, origemLines, totalRec, totalDes, patrimonio };
   };
 
   // ── Executar consulta ────────────────────────────────────────────────────────
@@ -1235,6 +1249,9 @@ DADOS FINANCEIROS REAIS:
 Patrimônio total: R$${ctx.patrimonio.toFixed(2)}
 Receitas: R$${ctx.totalRec.toFixed(2)} — ${ctx.recLines}
 Despesas: R$${ctx.totalDes.toFixed(2)}
+
+GASTOS POR ORIGEM (conta/cartão/dinheiro):
+${ctx.origemLines}
 
 DESPESAS DETALHADAS (Categoria › Subcategoria | lançamentos individuais):
 ${ctx.catLines}
